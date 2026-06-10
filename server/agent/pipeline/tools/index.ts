@@ -18,6 +18,10 @@ import { processMonitorTool } from "../../sandbox/processMonitorTool";
 import { slidesGenerateTool } from "./slides-generate";
 import { generateCodeTool } from "./generate-code";
 
+function createFsTools(_root: string, _sandbox: boolean): any[] { return []; }
+function createAgenticTools(): any[] { return []; }
+function createClawiRuntimeTools(): any[] { return []; }
+
 import { ToolDefinition } from "../types";
 export const fetchUrlTool: ToolDefinition = {
   id: "fetch_url",

@@ -384,6 +384,11 @@ export function GeminiCliOAuthButton({
   );
   const [callbackUrl, setCallbackUrl] = React.useState("");
   const [preferredEmail, setPreferredEmail] = React.useState(initialEmail || "");
+  React.useEffect(() => {
+    if (initialEmail && !preferredEmail) {
+      setPreferredEmail(initialEmail);
+    }
+  }, [initialEmail]);
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
   const lastBridgePayloadSignatureRef = React.useRef<string | null>(null);

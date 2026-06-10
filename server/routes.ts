@@ -717,9 +717,32 @@ export async function registerRoutes(
                     geminiPersistError?.message || geminiPersistError,
                   );
                 }
+                // Also save the token to the providers DB so the combined
+                // provider status endpoint (/api/oauth/providers/status) reports
+                // Gemini as connected. This avoids a second OAuth popup.
+                if (directTokens?.access_token) {
+                  try {
+                    const { providersService: ps } = await import("./services/providersService");
+                    const expiresAt = directTokens.expires_at
+                      ? directTokens.expires_at * 1000
+                      : Date.now() + 3600 * 1000;
+                    await ps.saveUserToken(
+                      String(userId),
+                      "gemini",
+                      directTokens.access_token,
+                      directTokens.refresh_token || null,
+                      expiresAt,
+                      "https://www.googleapis.com/auth/generative-language",
+                    );
+                  } catch (dbErr: any) {
+                    console.warn("[Auth] Gemini DB token persistence failed (non-blocking):", dbErr?.message || dbErr);
+                  }
+                }
                 // Always store the connected state in the session so the status
                 // endpoint can return connected: true immediately after redirect,
                 // even if file/DB persistence failed above.
+                // Include actual tokens so the status endpoint can re-persist
+                // credentials if the initial file/DB persistence failed.
                 if (sess) {
                   sess.geminiCliConnected = {
                     email: email || null,
@@ -727,6 +750,9 @@ export async function registerRoutes(
                     connectedAt: Date.now(),
                     persisted: geminiPersisted,
                     hasAccessToken: Boolean(directTokens?.access_token),
+                    accessToken: directTokens?.access_token || null,
+                    refreshToken: directTokens?.refresh_token || null,
+                    expiresAt: directTokens?.expires_at || null,
                   };
                 }
               }

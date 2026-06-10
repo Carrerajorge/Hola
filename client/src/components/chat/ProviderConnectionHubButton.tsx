@@ -203,14 +203,22 @@ export function ProviderConnectionHubButton({
     if (email) setAutoConnectEmail(email);
     // Open the hub dialog first
     setOpen(true);
-    // Then auto-open the specific provider dialog after a small delay
-    window.setTimeout(() => {
-      if ((provider === "gemini" || provider === "antigravity") && geminiOpenDialogRef.current) {
-        geminiOpenDialogRef.current();
-      } else if (provider === "openai" && openaiOpenDialogRef.current) {
-        openaiOpenDialogRef.current();
-      }
-    }, 600);
+    // Retry opening the specific provider dialog until the ref is available.
+    // Child components set the ref during render, which may take a few frames
+    // if content is lazy-loaded or queries are still settling.
+    const delays = [400, 800, 1500, 2500];
+    const timers: number[] = [];
+    for (const delay of delays) {
+      timers.push(window.setTimeout(() => {
+        if ((provider === "gemini" || provider === "antigravity") && geminiOpenDialogRef.current) {
+          geminiOpenDialogRef.current();
+          timers.forEach((t) => window.clearTimeout(t));
+        } else if (provider === "openai" && openaiOpenDialogRef.current) {
+          openaiOpenDialogRef.current();
+          timers.forEach((t) => window.clearTimeout(t));
+        }
+      }, delay));
+    }
   }, [queryClient]);
 
   React.useEffect(() => {
