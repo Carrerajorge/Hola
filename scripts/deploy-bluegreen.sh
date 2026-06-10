@@ -157,11 +157,13 @@ main() {
     cd "${DEPLOY_PATH}"
     apply_nginx_site_config
     
-    # Read current state
+    # Read current state (initialize if missing — first deploy or state was lost)
     STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
     if [ ! -f "${STATE_FILE}" ]; then
-        error "State file not found: ${STATE_FILE}"
-        exit 1
+        log "State file not found — initializing with blue slot as active"
+        cat > "${STATE_FILE}" <<INITSTATE
+{"active_slot":"blue","active_port":"3000","last_deploy":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","version":"initial"}
+INITSTATE
     fi
     
     ACTIVE_SLOT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_slot'])")"
