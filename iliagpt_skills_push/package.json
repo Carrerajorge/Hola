@@ -127,7 +127,7 @@
     "@uppy/react": "^5.1.1",
     "@upstash/redis": "^1.36.1",
     "@vitest/coverage-v8": "^4.0.16",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "^7.0.0-rc12",
     "asciimath2tex": "^1.5.0",
     "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
