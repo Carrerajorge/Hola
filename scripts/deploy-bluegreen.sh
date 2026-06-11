@@ -224,11 +224,14 @@ INITSTATE
     fi
 
     # Run migrations on the new image
+    # SESSION_SECRET is required by env validation but not by the migration itself.
+    # Pass a placeholder to avoid validation errors in the migration container.
     log "Running migrations..."
     docker run --rm \
         --network hola-net \
         -e DATABASE_URL="${DATABASE_URL}" \
         -e NODE_ENV=production \
+        -e SESSION_SECRET="${SESSION_SECRET:-migration-placeholder-not-used}" \
         "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" \
         npm run db:migrate:deploy || true
     

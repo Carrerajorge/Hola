@@ -268,6 +268,17 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
             console.log("[Google Auth] req.login() successful, sessionID:", req.sessionID);
 
+            // Persist userId on the session so getUserId() can find it even
+            // before Passport deserialization completes on subsequent requests.
+            const sess = (req as any).session;
+            if (sess) {
+                sess.authUserId = String(resolvedUser.id);
+                if (!sess.passport) sess.passport = {};
+                if (typeof sess.passport.user !== "string") {
+                    sess.passport.user = String(resolvedUser.id);
+                }
+            }
+
             // Update last login
             try {
                 await authStorage.updateUserLogin(resolvedUser.id, {

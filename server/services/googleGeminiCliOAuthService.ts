@@ -545,24 +545,54 @@ export async function getGoogleGeminiCliOAuthStatus(
       ? (storedProfile.credential as Record<string, unknown>).email ?? null
       : null;
 
-  // If file-based profile found, check if tokens might be expired
   if (storedProfile && storedProfile.credential) {
     const cred = storedProfile.credential as Record<string, unknown>;
     const expires = typeof cred.expires === "number" ? cred.expires : 0;
     if (expires > 0 && expires < Date.now()) {
-      // Token expired but profile exists - still report as connected
-      // (the token refresh flow will handle renewal)
       console.info("[GeminiCliOAuth] Token expired but profile exists for user:", userId);
     }
   }
 
+  if (storedProfile) {
+    return {
+      connected: true,
+      providerId: PROVIDER_ID,
+      defaultModelRef: DEFAULT_MODEL_REF,
+      defaultModelId: DEFAULT_MODEL_ID,
+      profileId: storedProfile.profileId ?? null,
+      email: typeof email === "string" ? email : null,
+    };
+  }
+
+  // Last-resort fallback: check the token manager for Google tokens
+  // that were saved during the OAuth login callback but may not have
+  // been propagated to file/DB provider storage yet.
+  if (userId) {
+    try {
+      const { tokenManager } = await import("../lib/auth/tokenManager.js");
+      const googleTokens = await tokenManager.getTokens(userId, "google");
+      if (googleTokens?.access_token) {
+        return {
+          connected: true,
+          providerId: PROVIDER_ID,
+          defaultModelRef: DEFAULT_MODEL_REF,
+          defaultModelId: DEFAULT_MODEL_ID,
+          profileId: `${PROVIDER_ID}:token-manager-fallback`,
+          email: null,
+        };
+      }
+    } catch {
+      // Token manager unavailable
+    }
+  }
+
   return {
-    connected: Boolean(storedProfile),
+    connected: false,
     providerId: PROVIDER_ID,
     defaultModelRef: DEFAULT_MODEL_REF,
     defaultModelId: DEFAULT_MODEL_ID,
-    profileId: storedProfile?.profileId ?? null,
-    email: typeof email === "string" ? email : null,
+    profileId: null,
+    email: null,
   };
 }
 

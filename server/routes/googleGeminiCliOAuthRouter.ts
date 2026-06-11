@@ -179,27 +179,33 @@ googleGeminiCliOAuthRouter.get(
       }
 
       if (userId) {
-        // Check if the authenticated user has a Google access_token
-        // that was obtained with Gemini scopes (set during Google OAuth login)
-        const sessionUser = (req as any).user;
-        if (sessionUser?.access_token) {
-          try {
+        // Check token manager for tokens persisted during Google OAuth login.
+        // Passport deserialization only restores the user record from DB, NOT
+        // the access_token/refresh_token that were stored in the session during
+        // the initial login callback. The token manager is the durable store.
+        try {
+          const { tokenManager } = await import("../lib/auth/tokenManager.js");
+          const storedTokens = await tokenManager.getTokens(userId, "google");
+          if (storedTokens?.access_token) {
+            const email = (req as any).user?.claims?.email || (req as any).user?.email;
             await persistGeminiCliCredentialsFromGoogleTokens(
               userId,
-              sessionUser.claims?.email || sessionUser.email,
+              email,
               {
-                access_token: sessionUser.access_token,
-                refresh_token: sessionUser.refresh_token,
-                expires_at: sessionUser.expires_at,
+                access_token: storedTokens.access_token,
+                refresh_token: storedTokens.refresh_token,
+                expires_at: storedTokens.expiry_date
+                  ? Math.floor(storedTokens.expiry_date / 1000)
+                  : undefined,
               },
             );
             const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
             if (refreshed.connected) {
               return res.json(refreshed);
             }
-          } catch {
-            // Re-persistence failed; continue to normal check
           }
+        } catch {
+          // Token manager unavailable or read failed; continue to normal check
         }
       }
 
