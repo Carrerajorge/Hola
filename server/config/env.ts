@@ -54,7 +54,7 @@ const envSchema = z.object({
   DEEPSEEK_MODEL: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
 
-  SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
+  SESSION_SECRET: z.string().min(1).default("dev-session-secret-change-me"),
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
