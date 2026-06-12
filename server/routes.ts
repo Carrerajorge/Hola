@@ -714,7 +714,12 @@ export async function registerRoutes(
                 } catch (geminiPersistError: any) {
                   console.warn(
                     "[Auth] Gemini CLI credential persistence failed (non-critical):",
-                    geminiPersistError?.message || geminiPersistError,
+                    {
+                      userId: String(userId),
+                      email: email || null,
+                      hasDirectTokens: Boolean(directTokens?.access_token),
+                      error: geminiPersistError?.message || geminiPersistError,
+                    },
                   );
                 }
                 // Also save the token to the providers DB so the combined
@@ -735,7 +740,11 @@ export async function registerRoutes(
                       "https://www.googleapis.com/auth/generative-language",
                     );
                   } catch (dbErr: any) {
-                    console.warn("[Auth] Gemini DB token persistence failed (non-blocking):", dbErr?.message || dbErr);
+                    console.warn("[Auth] Gemini DB token persistence failed (non-blocking):", {
+                      userId: String(userId),
+                      hasAccessToken: Boolean(directTokens?.access_token),
+                      error: dbErr?.message || dbErr,
+                    });
                   }
                 }
                 // Always store the connected state in the session so the status

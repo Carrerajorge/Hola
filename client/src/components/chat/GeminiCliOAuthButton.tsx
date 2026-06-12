@@ -765,10 +765,10 @@ export function GeminiCliOAuthButton({
 
     (async () => {
       // The Google OAuth callback with provider_hint=gemini already persists
-      // Gemini credentials server-side. Retry status checks with increasing
-      // delays to give the session time to settle before falling back to a
-      // second OAuth popup (which is usually unnecessary).
-      const statusCheckDelays = [600, 1500, 3000, 5000];
+      // Gemini credentials server-side. The status endpoint now also checks
+      // the session user's access_token directly, so the first check should
+      // succeed immediately after login. Retry with shorter delays as a safety net.
+      const statusCheckDelays = [300, 800, 1800, 3500];
       for (const delay of statusCheckDelays) {
         await new Promise((r) => setTimeout(r, delay));
         if (cancelled) return;

@@ -144,12 +144,20 @@ googleGeminiCliOAuthRouter.get(
     try {
       const userId = getUserId(req);
       const session = (req as any).session;
+      const sessionUser = (req as any).user;
 
-      // Fast path: check session-level Gemini connection flag FIRST,
-      // regardless of whether getUserId() succeeded. The flag is set by
-      // the Google login callback when provider_hint is gemini/antigravity.
-      // Checking it before userId avoids a race condition where passport
-      // deserialization hasn't completed but the session data is available.
+      const connectedResponse = (email: string | null, profileId = "session-fallback") => ({
+        connected: true,
+        providerId: "google-gemini-cli" as const,
+        defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview" as const,
+        defaultModelId: "gemini-3.1-pro-preview" as const,
+        profileId,
+        email,
+      });
+
+      // 1. Session-level Gemini connection flag (set by Google login callback
+      //    when provider_hint is gemini/antigravity). Most reliable for the
+      //    immediately-after-login window.
       const sessionGemini = session?.geminiCliConnected;
       if (
         sessionGemini &&
@@ -168,38 +176,59 @@ googleGeminiCliOAuthRouter.get(
             },
           ).catch(() => {});
         }
-        return res.json({
-          connected: true,
-          providerId: "google-gemini-cli",
-          defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
-          defaultModelId: "gemini-3.1-pro-preview",
-          profileId: "session-fallback",
-          email: sessionGemini.email || null,
-        });
+        return res.json(connectedResponse(sessionGemini.email || null));
       }
 
+      // 2. Session user has a Google access_token (only available on the initial
+      //    request right after Passport callback, before serialization).
+      const googleTokens = sessionUser?._googleOAuthTokens || (
+        sessionUser?.access_token ? {
+          access_token: sessionUser.access_token,
+          refresh_token: sessionUser.refresh_token,
+          expires_at: sessionUser.expires_at,
+        } : null
+      );
+      if (googleTokens?.access_token && userId) {
+        const userEmail = sessionUser.claims?.email || sessionUser.email || null;
+        persistGeminiCliCredentialsFromGoogleTokens(
+          userId,
+          userEmail,
+          googleTokens,
+        ).catch(() => {});
+        return res.json(connectedResponse(userEmail, `user-token:${userId}`));
+      }
+
+      // 3. File-based and DB-backed profile resolution
       if (userId) {
-        // Check if the authenticated user has a Google access_token
-        // that was obtained with Gemini scopes (set during Google OAuth login)
-        const sessionUser = (req as any).user;
-        if (sessionUser?.access_token) {
-          try {
-            await persistGeminiCliCredentialsFromGoogleTokens(
-              userId,
-              sessionUser.claims?.email || sessionUser.email,
-              {
-                access_token: sessionUser.access_token,
-                refresh_token: sessionUser.refresh_token,
-                expires_at: sessionUser.expires_at,
-              },
-            );
-            const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
-            if (refreshed.connected) {
-              return res.json(refreshed);
+        const status = await getGoogleGeminiCliOAuthStatus(userId);
+        if (status.connected) {
+          return res.json(status);
+        }
+      }
+
+      // 4. Check DB provider tokens directly as final fallback
+      if (userId) {
+        try {
+          const { providersService } = await import("../services/providersService.js");
+          const tokenStatus = await providersService.getUserTokenStatus(userId, "gemini");
+          if (tokenStatus.connected) {
+            // Set session flag so subsequent requests don't need the DB lookup
+            if (session && !session.geminiCliConnected) {
+              session.geminiCliConnected = {
+                hasAccessToken: true,
+                email: null,
+                userId,
+                connectedAt: Date.now(),
+                persisted: true,
+              };
+              if (typeof session.save === "function") {
+                session.save(() => {});
+              }
             }
-          } catch {
-            // Re-persistence failed; continue to normal check
+            return res.json(connectedResponse(null, `db-provider:${userId}`));
           }
+        } catch {
+          // DB might not have the oauth tables yet
         }
       }
 
