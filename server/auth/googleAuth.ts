@@ -374,31 +374,13 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                         })()
                     );
 
-                    // Wait for all persistence methods (with timeout to avoid blocking redirect)
+                    // Wait for all persistence methods (with generous timeout).
+                    // The DB write must complete before redirect so the status
+                    // endpoint can detect the connection on the next request.
                     await Promise.race([
                         Promise.allSettled(persistPromises),
-                        new Promise(resolve => setTimeout(resolve, 5000)),
+                        new Promise(resolve => setTimeout(resolve, 15000)),
                     ]);
-                }
-
-                // If provider_hint is openai, persist Google tokens as OpenAI provider
-                // tokens so the auto-connect can detect them via session fallback.
-                if (stateData.providerHint === "openai") {
-                    try {
-                        const { providersService } = await import("../services/providersService.js");
-                        const expiresAt = Date.now() + (tokens.expires_in || 3600) * 1000;
-                        await providersService.saveUserToken(
-                            resolvedUser.id,
-                            "openai",
-                            tokens.access_token,
-                            tokens.refresh_token || null,
-                            expiresAt,
-                            "openid email profile",
-                        );
-                        console.log("[Google Auth] OpenAI provider token saved to DB for:", email);
-                    } catch (dbError: any) {
-                        console.warn("[Google Auth] OpenAI DB token persistence failed (non-blocking):", dbError?.message || dbError);
-                    }
                 }
 
                 // If a provider_hint was set during login, redirect to a post-login

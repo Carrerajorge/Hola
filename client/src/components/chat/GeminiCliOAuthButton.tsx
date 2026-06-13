@@ -818,15 +818,16 @@ export function GeminiCliOAuthButton({
       // After login redirect with provider_hint=gemini, the server already
       // persisted Gemini credentials during the Google OAuth callback.
       // The status checks above may have failed due to session timing.
-      // Show a success message and trust the server-side persistence
-      // instead of starting a redundant second OAuth flow that would
-      // trigger popup blockers and potentially cause an infinite redirect loop.
+      // Trust the server-side persistence and notify the parent so the
+      // model selector updates, instead of starting a redundant second
+      // OAuth flow that would trigger popup blockers.
+      await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      await Promise.resolve(onConnected?.("gemini-3.1-pro-preview"));
       toast({
         title: "Gemini vinculado",
         description:
           "Las credenciales de Gemini se configuraron durante el inicio de sesion. Los modelos estaran disponibles en breve.",
       });
-      await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       setOpen(false);
     })();
 

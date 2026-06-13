@@ -175,6 +175,7 @@ export function ProviderConnectionHubButton({
 
   // Refs to auto-open specific provider dialogs after OAuth login redirect
   const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
+  const antigravityOpenDialogRef = React.useRef<(() => void) | null>(null);
   const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
 
   // Track the email from the login redirect so we can pass it as loginHint to the provider OAuth.
@@ -210,7 +211,10 @@ export function ProviderConnectionHubButton({
     const timers: number[] = [];
     for (const delay of delays) {
       timers.push(window.setTimeout(() => {
-        if ((provider === "gemini" || provider === "antigravity") && geminiOpenDialogRef.current) {
+        if (provider === "antigravity" && antigravityOpenDialogRef.current) {
+          antigravityOpenDialogRef.current();
+          timers.forEach((t) => window.clearTimeout(t));
+        } else if (provider === "gemini" && geminiOpenDialogRef.current) {
           geminiOpenDialogRef.current();
           timers.forEach((t) => window.clearTimeout(t));
         } else if (provider === "openai" && openaiOpenDialogRef.current) {
@@ -407,7 +411,9 @@ export function ProviderConnectionHubButton({
                 onConnected={handleConnected}
                 autoStart={autoStartProvider === "antigravity"}
                 initialEmail={autoConnectEmail || undefined}
-                renderTrigger={({ isBusy, isConnected: geminiConnected, openDialog }) => (
+                renderTrigger={({ isBusy, isConnected: geminiConnected, openDialog }) => {
+                  antigravityOpenDialogRef.current = openDialog;
+                  return (
                   <ProviderCard
                     title="Loguear con Antigravity"
                     description={
@@ -426,7 +432,8 @@ export function ProviderConnectionHubButton({
                     isBusy={isBusy}
                     testId="provider-card-antigravity"
                   />
-                )}
+                  );
+                }}
               />
             </div>
           </div>
