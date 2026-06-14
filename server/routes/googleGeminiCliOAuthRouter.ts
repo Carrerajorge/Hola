@@ -158,15 +158,19 @@ googleGeminiCliOAuthRouter.get(
       ) {
         const effectiveUserId = userId || session?.passport?.user;
         if (sessionGemini.accessToken && effectiveUserId) {
-          persistGeminiCliCredentialsFromGoogleTokens(
-            effectiveUserId,
-            sessionGemini.email,
-            {
-              access_token: sessionGemini.accessToken,
-              refresh_token: sessionGemini.refreshToken,
-              expires_at: sessionGemini.expiresAt,
-            },
-          ).catch(() => {});
+          try {
+            await persistGeminiCliCredentialsFromGoogleTokens(
+              effectiveUserId,
+              sessionGemini.email,
+              {
+                access_token: sessionGemini.accessToken,
+                refresh_token: sessionGemini.refreshToken,
+                expires_at: sessionGemini.expiresAt,
+              },
+            );
+          } catch (persistErr: any) {
+            console.warn("[GeminiCliOAuth] session→DB sync failed (non-fatal):", persistErr?.message);
+          }
         }
         return res.json({
           connected: true,

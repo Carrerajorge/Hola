@@ -375,10 +375,15 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     );
 
                     // Wait for all persistence methods (with timeout to avoid blocking redirect)
-                    await Promise.race([
+                    const results = await Promise.race([
                         Promise.allSettled(persistPromises),
-                        new Promise(resolve => setTimeout(resolve, 5000)),
+                        new Promise<PromiseSettledResult<void>[]>(resolve =>
+                            setTimeout(() => resolve([{ status: "rejected", reason: new Error("persistence timeout") }]), 8000)),
                     ]);
+                    const allFailed = results.every(r => r.status === "rejected");
+                    if (allFailed) {
+                        console.error("[Google Auth] All Gemini credential persistence methods failed for:", email);
+                    }
                 }
 
                 // If provider_hint is openai, persist Google tokens as OpenAI provider

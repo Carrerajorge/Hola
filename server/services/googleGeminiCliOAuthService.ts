@@ -54,6 +54,29 @@ type AuthProfileStore = {
   order?: Record<string, string[]>;
 };
 
+const inMemoryCredentialStore = new Map<string, { credential: GeminiCliOAuthCredentials; persistedAt: number }>();
+const IN_MEMORY_TTL_MS = 48 * 3600 * 1000;
+
+function setInMemoryCredentials(userId: string, credentials: GeminiCliOAuthCredentials): void {
+  inMemoryCredentialStore.set(userId, { credential: credentials, persistedAt: Date.now() });
+  if (inMemoryCredentialStore.size > 500) {
+    const oldest = [...inMemoryCredentialStore.entries()]
+      .sort((a, b) => a[1].persistedAt - b[1].persistedAt)
+      .slice(0, 100);
+    for (const [key] of oldest) inMemoryCredentialStore.delete(key);
+  }
+}
+
+function getInMemoryCredentials(userId: string): GeminiCliOAuthCredentials | null {
+  const entry = inMemoryCredentialStore.get(userId);
+  if (!entry) return null;
+  if (Date.now() - entry.persistedAt > IN_MEMORY_TTL_MS) {
+    inMemoryCredentialStore.delete(userId);
+    return null;
+  }
+  return entry.credential;
+}
+
 function loadAuthStoreFromDisk(storePath: string): AuthProfileStore | null {
   try {
     if (!fs.existsSync(storePath)) return null;
@@ -76,7 +99,18 @@ function saveAuthStoreToDisk(storePath: string, store: AuthProfileStore): void {
 }
 
 async function resolveStoredProfile(userId?: string | null) {
-  // Try file-based auth-profiles.json first
+  // 0. In-memory store (fastest, most reliable after fresh OAuth)
+  if (userId) {
+    const memCred = getInMemoryCredentials(userId);
+    if (memCred) {
+      return {
+        profileId: buildProfileId(memCred.email),
+        credential: { provider: PROVIDER_ID, type: "oauth", source: "memory", email: memCred.email },
+      };
+    }
+  }
+
+  // 1. File-based auth-profiles.json
   const agentDir = resolveUserScopedAgentDir(userId);
   if (agentDir) {
     const storePath = path.join(agentDir, "auth-profiles.json");
@@ -98,7 +132,7 @@ async function resolveStoredProfile(userId?: string | null) {
     }
   }
 
-  // Fallback: check database-backed provider tokens (providerOAuthRouter storage)
+  // 2. Database-backed provider tokens
   if (userId) {
     try {
       const { providersService } = await import("./providersService.js");
@@ -126,6 +160,8 @@ async function persistGeminiCliOAuthCredentials(
   credentials: GeminiCliOAuthCredentials,
   userId: string,
 ): Promise<void> {
+  setInMemoryCredentials(userId, credentials);
+
   let filePersisted = false;
 
   // 1. File-based persistence (auth-profiles.json)

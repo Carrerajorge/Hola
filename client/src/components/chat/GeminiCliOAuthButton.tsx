@@ -764,11 +764,7 @@ export function GeminiCliOAuthButton({
     let cancelled = false;
 
     (async () => {
-      // The Google OAuth callback with provider_hint=gemini already persists
-      // Gemini credentials server-side. Retry status checks with increasing
-      // delays to give the session time to settle before falling back to a
-      // second OAuth popup (which is usually unnecessary).
-      const statusCheckDelays = [600, 1500, 3000, 5000];
+      const statusCheckDelays = [300, 800, 1500, 2500, 4000, 6000, 9000];
       for (const delay of statusCheckDelays) {
         await new Promise((r) => setTimeout(r, delay));
         if (cancelled) return;
@@ -779,6 +775,7 @@ export function GeminiCliOAuthButton({
             queryFn: async () => {
               const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
                 cache: "no-store",
+                headers: { "Cache-Control": "no-cache" },
               });
               if (!res.ok) throw new Error("Status check failed");
               return res.json();
@@ -791,7 +788,7 @@ export function GeminiCliOAuthButton({
             await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
             await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
             toast({
-              title: "Gemini CLI ya vinculado",
+              title: "Gemini CLI vinculado",
               description: freshStatus.email
                 ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
                 : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
@@ -815,12 +812,6 @@ export function GeminiCliOAuthButton({
         return;
       }
 
-      // After login redirect with provider_hint=gemini, the server already
-      // persisted Gemini credentials during the Google OAuth callback.
-      // The status checks above may have failed due to session timing.
-      // Show a success message and trust the server-side persistence
-      // instead of starting a redundant second OAuth flow that would
-      // trigger popup blockers and potentially cause an infinite redirect loop.
       toast({
         title: "Gemini vinculado",
         description:
