@@ -32,7 +32,7 @@ export async function persistGoogleTokensAsGeminiCli(
       access_token: directTokens.access_token,
       refresh_token: directTokens.refresh_token,
       expiry_date: directTokens.expires_at
-        ? directTokens.expires_at * 1000
+        ? (directTokens.expires_at > 1e12 ? directTokens.expires_at : directTokens.expires_at * 1000)
         : Date.now() + 3600 * 1000,
     };
   } else {

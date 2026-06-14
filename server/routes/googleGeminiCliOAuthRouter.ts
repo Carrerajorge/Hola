@@ -145,21 +145,21 @@ googleGeminiCliOAuthRouter.get(
       const userId = getUserId(req);
       const session = (req as any).session;
 
-      // Fast path: check session-level Gemini connection flag FIRST,
-      // regardless of whether getUserId() succeeded. The flag is set by
-      // the Google login callback when provider_hint is gemini/antigravity.
-      // Checking it before userId avoids a race condition where passport
-      // deserialization hasn't completed but the session data is available.
+      // Fast path: check session-level Gemini connection flag first.
+      // This is set by the Google login callback when provider_hint is gemini/antigravity,
+      // and avoids the slower file/DB lookups that may fail in transient environments.
+      // Check regardless of whether getUserId() succeeded — the session flag
+      // is available even before passport deserialization completes.
       const sessionGemini = session?.geminiCliConnected;
       if (
         sessionGemini &&
         sessionGemini.hasAccessToken &&
         Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
       ) {
-        const effectiveUserId = userId || session?.passport?.user;
-        if (sessionGemini.accessToken && effectiveUserId) {
+        const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
+        if (sessionGemini.accessToken && fastPathUserId) {
           persistGeminiCliCredentialsFromGoogleTokens(
-            effectiveUserId,
+            fastPathUserId,
             sessionGemini.email,
             {
               access_token: sessionGemini.accessToken,
@@ -178,14 +178,13 @@ googleGeminiCliOAuthRouter.get(
         });
       }
 
-      if (userId) {
-        // Check if the authenticated user has a Google access_token
-        // that was obtained with Gemini scopes (set during Google OAuth login)
+      const effectiveUserId = userId || session?.passport?.user || session?.authUserId;
+      if (effectiveUserId) {
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {
           try {
             await persistGeminiCliCredentialsFromGoogleTokens(
-              userId,
+              effectiveUserId,
               sessionUser.claims?.email || sessionUser.email,
               {
                 access_token: sessionUser.access_token,
@@ -193,7 +192,7 @@ googleGeminiCliOAuthRouter.get(
                 expires_at: sessionUser.expires_at,
               },
             );
-            const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
+            const refreshed = await getGoogleGeminiCliOAuthStatus(effectiveUserId);
             if (refreshed.connected) {
               return res.json(refreshed);
             }
@@ -203,7 +202,7 @@ googleGeminiCliOAuthRouter.get(
         }
       }
 
-      const status = await getGoogleGeminiCliOAuthStatus(userId);
+      const status = await getGoogleGeminiCliOAuthStatus(effectiveUserId || userId);
       res.json(status);
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);

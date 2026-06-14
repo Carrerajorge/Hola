@@ -226,7 +226,7 @@ export async function persistGeminiCliCredentialsFromGoogleTokens(
     access: tokens.access_token,
     refresh: tokens.refresh_token || "",
     expires: tokens.expires_at
-      ? tokens.expires_at * 1000
+      ? (tokens.expires_at > 1e12 ? tokens.expires_at : tokens.expires_at * 1000)
       : Date.now() + 3600 * 1000,
     projectId:
       process.env.GOOGLE_CLOUD_PROJECT ||

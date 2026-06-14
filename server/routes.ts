@@ -724,7 +724,7 @@ export async function registerRoutes(
                   try {
                     const { providersService: ps } = await import("./services/providersService");
                     const expiresAt = directTokens.expires_at
-                      ? directTokens.expires_at * 1000
+                      ? (directTokens.expires_at > 1e12 ? directTokens.expires_at : directTokens.expires_at * 1000)
                       : Date.now() + 3600 * 1000;
                     await ps.saveUserToken(
                       String(userId),
@@ -761,8 +761,17 @@ export async function registerRoutes(
               if (sess?.save) {
                 sess.save((saveErr: any) => {
                   if (saveErr) {
-                    console.error("[Auth] Google session save error:", saveErr);
-                    return res.redirect("/login?error=session_error");
+                    console.warn("[Auth] Google session save failed, retrying once:", saveErr);
+                    // Retry once after a short delay
+                    setTimeout(() => {
+                      sess.save((retryErr: any) => {
+                        if (retryErr) {
+                          console.error("[Auth] Google session save retry failed:", retryErr);
+                        }
+                        doRedirect();
+                      });
+                    }, 200);
+                    return;
                   }
                   doRedirect();
                 });
