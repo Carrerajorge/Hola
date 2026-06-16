@@ -158,13 +158,17 @@ googleGeminiCliOAuthRouter.get(
       ) {
         const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
         if (sessionGemini.accessToken && fastPathUserId) {
+          // Normalize expiresAt: values < 1e12 are seconds, convert to ms
+          const normalizedExpiresAt = sessionGemini.expiresAt
+            ? (sessionGemini.expiresAt > 1e12 ? sessionGemini.expiresAt : sessionGemini.expiresAt * 1000)
+            : undefined;
           persistGeminiCliCredentialsFromGoogleTokens(
             fastPathUserId,
             sessionGemini.email,
             {
               access_token: sessionGemini.accessToken,
               refresh_token: sessionGemini.refreshToken,
-              expires_at: sessionGemini.expiresAt,
+              expires_at: normalizedExpiresAt,
             },
           ).catch(() => {});
         }

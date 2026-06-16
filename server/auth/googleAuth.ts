@@ -290,12 +290,25 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 console.warn("[Google Auth] Failed to create audit log:", auditError);
             }
 
-            // Force session save before redirect (critical for OAuth flow)
-            req.session.save(async (saveErr: any) => {
-                if (saveErr) {
-                    console.error("[Google Auth] Session save failed:", saveErr);
-                    return res.redirect("/login?error=session_save_error");
-                }
+            // Force session save before redirect (critical for OAuth flow).
+            // Retry once on transient failure to avoid losing credentials.
+            const saveSessionWithRetry = (cb: () => void) => {
+                req.session.save(async (saveErr: any) => {
+                    if (saveErr) {
+                        console.warn("[Google Auth] Session save attempt 1 failed, retrying:", saveErr?.message);
+                        req.session.save((retryErr: any) => {
+                            if (retryErr) {
+                                console.error("[Google Auth] Session save retry failed:", retryErr);
+                                return res.redirect("/login?error=session_save_error");
+                            }
+                            cb();
+                        });
+                        return;
+                    }
+                    cb();
+                });
+            };
+            saveSessionWithRetry(async () => {
 
                 console.log("[Google Auth] Login successful for:", email);
 
@@ -326,7 +339,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                         connectedAt: Date.now(),
                         accessToken: tokens.access_token,
                         refreshToken: tokens.refresh_token || null,
-                        expiresAt: Math.floor(Date.now() / 1000 + (tokens.expires_in || 3600)),
+                        expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
+                        userId: resolvedUser.id,
                     };
                     (req.session as any).geminiCliConnected = geminiConnectedFlag;
                     console.log("[Google Auth] geminiCliConnected session flag set for:", email);
@@ -344,7 +358,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                                     {
                                         access_token: tokens.access_token,
                                         refresh_token: tokens.refresh_token,
-                                        expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                                        expires_at: Date.now() + (tokens.expires_in || 3600) * 1000,
                                     },
                                 );
                                 console.log("[Google Auth] Gemini CLI credentials persisted for:", email);

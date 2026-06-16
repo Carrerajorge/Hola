@@ -39,7 +39,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          # Support both base64-encoded (VPS_SSH_KEY_B64) and raw (VPS_SSH_KEY) formats
+          if [ -n "${{ secrets.VPS_SSH_KEY_B64 }}" ]; then
+            echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          elif [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          else
+            echo "::error::Missing VPS_SSH_KEY or VPS_SSH_KEY_B64 secret"
+            exit 1
+          fi
           chmod 600 ~/.ssh/deploy_key
           {
             echo "Host *"

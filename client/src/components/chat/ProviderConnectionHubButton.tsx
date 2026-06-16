@@ -206,7 +206,7 @@ export function ProviderConnectionHubButton({
     // Retry opening the specific provider dialog until the ref is available.
     // Child components set the ref during render, which may take a few frames
     // if content is lazy-loaded or queries are still settling.
-    const delays = [400, 800, 1500, 2500];
+    const delays = [300, 600, 1200, 2000, 3500, 5500];
     const timers: number[] = [];
     for (const delay of delays) {
       timers.push(window.setTimeout(() => {
