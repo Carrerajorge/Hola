@@ -222,12 +222,28 @@ export async function persistGeminiCliCredentialsFromGoogleTokens(
     return;
   }
 
+  // Normalize expires_at: values below 1e10 are likely seconds (Unix timestamp),
+  // values above 1e12 are already milliseconds. Between 1e10-1e12 we check if
+  // it looks like seconds or ms by comparing to current time.
+  let expiresMs: number;
+  if (!tokens.expires_at) {
+    expiresMs = Date.now() + 3600 * 1000;
+  } else if (tokens.expires_at > 1e12) {
+    expiresMs = tokens.expires_at;
+  } else if (tokens.expires_at < 1e10) {
+    expiresMs = tokens.expires_at * 1000;
+  } else {
+    // Ambiguous range: if value is close to current epoch in seconds, treat as seconds
+    const nowSec = Math.floor(Date.now() / 1000);
+    expiresMs = Math.abs(tokens.expires_at - nowSec) < 86400 * 365
+      ? tokens.expires_at * 1000
+      : tokens.expires_at;
+  }
+
   const credentials: GeminiCliOAuthCredentials = {
     access: tokens.access_token,
     refresh: tokens.refresh_token || "",
-    expires: tokens.expires_at
-      ? (tokens.expires_at > 1e12 ? tokens.expires_at : tokens.expires_at * 1000)
-      : Date.now() + 3600 * 1000,
+    expires: expiresMs,
     projectId:
       process.env.GOOGLE_CLOUD_PROJECT ||
       process.env.GOOGLE_CLOUD_PROJECT_ID ||

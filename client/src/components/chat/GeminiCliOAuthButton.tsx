@@ -754,8 +754,8 @@ export function GeminiCliOAuthButton({
   // fetch (staleTime: 0) to avoid seeing stale cached data from before the login.
   const autoStartTriggeredRef = React.useRef(false);
   const autoStartRetryCountRef = React.useRef(0);
-  const AUTO_START_MAX_RETRIES = 5;
-  const AUTO_START_RETRY_DELAYS = [500, 1200, 2500, 4000, 6000];
+  const AUTO_START_MAX_RETRIES = 7;
+  const AUTO_START_RETRY_DELAYS = [400, 800, 1500, 2500, 4000, 6000, 9000];
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
@@ -768,7 +768,7 @@ export function GeminiCliOAuthButton({
       // Gemini credentials server-side. Retry status checks with increasing
       // delays to give the session time to settle before falling back to a
       // second OAuth popup (which is usually unnecessary).
-      const statusCheckDelays = [600, 1500, 3000, 5000];
+      const statusCheckDelays = [400, 1000, 2000, 3500, 5500, 8000, 12000];
       for (const delay of statusCheckDelays) {
         await new Promise((r) => setTimeout(r, delay));
         if (cancelled) return;
