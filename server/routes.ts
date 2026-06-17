@@ -755,6 +755,18 @@ export async function registerRoutes(
                     expiresAt: directTokens?.expires_at || null,
                   };
                 }
+
+                // Set a short-lived cookie as a backup signal so the Gemini
+                // CLI status endpoint can detect the connection even if the
+                // session store hasn't committed the update by the time the
+                // client's first status check arrives after redirect.
+                res.cookie("__iliagpt_gc", "1", {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: env.NODE_ENV === "production" ? "none" as const : "lax" as const,
+                  maxAge: 5 * 60 * 1000,
+                  path: "/",
+                });
               }
 
               const doRedirect = () => res.redirect(redirectTarget);
