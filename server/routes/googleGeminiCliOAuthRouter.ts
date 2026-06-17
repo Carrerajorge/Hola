@@ -22,6 +22,7 @@ import {
   getGoogleGeminiCliOAuthStatus,
   persistGeminiCliCredentialsFromGoogleTokens,
 } from "../services/googleGeminiCliOAuthService";
+import { providersService } from "../services/providersService";
 
 const FLOW_TTL_MS = 45 * 60 * 1000;
 
@@ -182,8 +183,36 @@ googleGeminiCliOAuthRouter.get(
         });
       }
 
+      // Cookie-based backup: the Google OAuth callback sets __iliagpt_gc=1
+      // as a short-lived signal when provider_hint was gemini/antigravity.
+      // If the session store hasn't committed yet, this cookie confirms
+      // the user just completed Gemini OAuth and credentials were persisted.
+      const gcCookie = req.cookies?.["__iliagpt_gc"] || (
+        req.headers.cookie?.includes("__iliagpt_gc=1") ? "1" : ""
+      );
+
       const effectiveUserId = userId || session?.passport?.user || session?.authUserId;
       if (effectiveUserId) {
+        // If the gc cookie is present, try DB lookup first since credentials
+        // were just persisted and the session may not have propagated yet.
+        if (gcCookie === "1") {
+          try {
+            const dbStatus = await providersService.getUserTokenStatus(effectiveUserId, "gemini");
+            if (dbStatus.connected) {
+              return res.json({
+                connected: true,
+                providerId: "google-gemini-cli",
+                defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+                defaultModelId: "gemini-3.1-pro-preview",
+                profileId: "cookie-signal-db",
+                email: null,
+              });
+            }
+          } catch {
+            // DB check failed; continue
+          }
+        }
+
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {
           try {
@@ -207,6 +236,32 @@ googleGeminiCliOAuthRouter.get(
       }
 
       const status = await getGoogleGeminiCliOAuthStatus(effectiveUserId || userId);
+      if (status.connected) {
+        return res.json(status);
+      }
+
+      // Final fallback: check the providers DB (oauth_tokens_user table).
+      // The Google OAuth callback persists tokens here via providersService,
+      // which may succeed even when file-based persistence fails.
+      const dbUserId = effectiveUserId || userId;
+      if (dbUserId) {
+        try {
+          const dbStatus = await providersService.getUserTokenStatus(dbUserId, "gemini");
+          if (dbStatus.connected) {
+            return res.json({
+              connected: true,
+              providerId: "google-gemini-cli",
+              defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+              defaultModelId: "gemini-3.1-pro-preview",
+              profileId: "db-fallback",
+              email: null,
+            });
+          }
+        } catch {
+          // DB check failed; return file-based status
+        }
+      }
+
       res.json(status);
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);
