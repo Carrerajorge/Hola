@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { parse as parseCookie } from "cookie";
 import { Router, type Request, type Response } from "express";
 import { getUserId } from "../types/express";
 import {
@@ -107,6 +108,31 @@ function renderOpenAICodexOAuthBridge(
 
 openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
   try {
+    // Cookie fallback: set by Google OAuth callback with provider_hint=openai.
+    // Survives even when the session/DB store hasn't propagated yet.
+    const cookies = req.cookies || (req.headers.cookie ? parseCookie(req.headers.cookie) : {});
+    const cookieRaw = cookies.iliagpt_provider_connected_openai;
+    if (cookieRaw) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cookieRaw));
+        if (
+          parsed?.provider === "openai" &&
+          parsed.ts &&
+          Date.now() - parsed.ts < 5 * 60 * 1000
+        ) {
+          res.clearCookie("iliagpt_provider_connected_openai", { path: "/" });
+          return res.json({
+            connected: true,
+            providerId: "openai-codex",
+            defaultModelRef: "openai-codex/gpt-5.4",
+            defaultModelId: "gpt-5.4",
+            profileId: "cookie-fallback",
+            accountId: null,
+          });
+        }
+      } catch {}
+    }
+
     res.json(await getOpenAICodexOAuthStatus(getUserId(req)));
   } catch (error) {
     console.error("[OpenAICodexOAuth] status failed:", error);
