@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { requireAdmin } from "./admin/utils";
 import { getUserId } from "../types/express";
+import { parse as parseCookie } from "cookie";
 import {
   clearExpiredGeminiCliOAuthCompletedStore,
   clearExpiredGeminiCliOAuthFlows,
@@ -179,6 +180,44 @@ googleGeminiCliOAuthRouter.get(
           defaultModelId: "gemini-3.1-pro-preview",
           profileId: "session-fallback",
           email: sessionGemini.email || null,
+        });
+      }
+
+      // Cookie fallback: the Google OAuth callback sets a short-lived
+      // cookie when provider_hint is gemini/antigravity. This survives
+      // even when the session store hasn't propagated the flag yet.
+      const cookieFallback = (() => {
+        try {
+          const cookies = req.cookies || (req.headers.cookie ? parseCookie(req.headers.cookie) : {});
+          const raw =
+            cookies.iliagpt_provider_connected_gemini ||
+            cookies.iliagpt_provider_connected_antigravity;
+          if (!raw) return null;
+          const parsed = JSON.parse(decodeURIComponent(raw));
+          if (
+            parsed &&
+            (parsed.provider === "gemini" || parsed.provider === "antigravity") &&
+            parsed.ts &&
+            Date.now() - parsed.ts < 5 * 60 * 1000
+          ) {
+            return parsed as { provider: string; email: string | null; userId: string };
+          }
+        } catch {}
+        return null;
+      })();
+
+      if (cookieFallback) {
+        const fallbackUserId = userId || cookieFallback.userId;
+        // Clear the one-shot cookie so it doesn't persist beyond first check
+        res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
+        res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
+        return res.json({
+          connected: true,
+          providerId: "google-gemini-cli",
+          defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+          defaultModelId: "gemini-3.1-pro-preview",
+          profileId: "cookie-fallback",
+          email: cookieFallback.email || null,
         });
       }
 

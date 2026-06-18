@@ -428,6 +428,24 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 const doRedirect = () => {
                     if (stateData.providerHint === "gemini" || stateData.providerHint === "openai" || stateData.providerHint === "antigravity") {
                         const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
+                        // Set a short-lived cookie as a fallback signal for the
+                        // status endpoint. The session store may lag behind the
+                        // redirect, but a cookie is available on the very next
+                        // request from the same browser.
+                        const cookieName = `iliagpt_provider_connected_${stateData.providerHint}`;
+                        const cookieValue = encodeURIComponent(JSON.stringify({
+                            provider: stateData.providerHint,
+                            email: email || null,
+                            userId: resolvedUser.id,
+                            ts: Date.now(),
+                        }));
+                        res.cookie(cookieName, cookieValue, {
+                            httpOnly: true,
+                            secure: env.NODE_ENV === "production",
+                            sameSite: "lax",
+                            maxAge: 5 * 60 * 1000,
+                            path: "/",
+                        });
                         res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}`);
                     } else {
                         res.redirect(stateData.returnUrl || "/?auth=success");

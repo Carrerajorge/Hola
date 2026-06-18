@@ -149,6 +149,18 @@ jobs:
 
           bash ./scripts/latest-main-guard.sh
 
+      - name: Free disk space for Docker build
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        run: |
+          set -euo pipefail
+          echo "▸ Disk before cleanup:"
+          df -h /
+          # Remove preinstalled toolchains that are not needed for Docker builds
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo docker image prune --all --force 2>/dev/null || true
+          echo "▸ Disk after cleanup:"
+          df -h /
+
       - name: Set up Swap Space
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: pierotofy/set-swap-space@master
@@ -286,6 +298,15 @@ jobs:
           echo "▸ App image digest: ${{ steps.build_app.outputs.digest }}"
           echo "▸ Sandbox digest:   ${{ steps.build_sandbox.outputs.digest }}"
           echo "▸ OCR digest:       ${{ steps.build_ocr.outputs.digest }}"
+
+      - name: Reclaim disk before smoke test
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        run: |
+          set -euo pipefail
+          # BuildKit cache layers can fill the runner disk; prune before pulling fresh images.
+          docker builder prune --all --force 2>/dev/null || true
+          docker image prune --all --force 2>/dev/null || true
+          echo "▸ Disk before smoke test:" && df -h /
 
       - name: Smoke-test production app image boot
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
