@@ -59,6 +59,7 @@ vi.mock("./OAuthProviderLogos", () => ({
   ChatGptLogoIcon: () => <span>CG</span>,
   ClaudeLogoIcon: () => <span>CL</span>,
   GeminiLogoIcon: () => <span>GM</span>,
+  OpenAILogoIcon: () => <span>OA</span>,
 }));
 
 function renderWithQueryClient(ui: ReactElement) {

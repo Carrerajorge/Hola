@@ -17,7 +17,6 @@ import { GeminiCliOAuthButton } from "./GeminiCliOAuthButton";
 import { OpenAICodexOAuthButton } from "./OpenAICodexOAuthButton";
 import {
   AntigravityLogoIcon,
-  ChatGptLogoIcon,
   ClaudeLogoIcon,
   GeminiLogoIcon,
   OpenAILogoIcon,

@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { ChatGptLogoIcon, OpenAILogoIcon } from "./OAuthProviderLogos";
+import { OpenAILogoIcon } from "./OAuthProviderLogos";
 
 type OpenAICodexOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
@@ -428,7 +428,7 @@ export function OpenAICodexOAuthButton({
           aria-label={isConnected ? "ChatGPT conectado" : "Conectar ChatGPT"}
           data-testid="button-openai-codex-oauth"
         >
-          <ChatGptLogoIcon
+          <OpenAILogoIcon
             className={isConnected ? "text-emerald-600" : "text-foreground"}
           />
         </Button>
