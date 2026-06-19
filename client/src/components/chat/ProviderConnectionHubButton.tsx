@@ -17,9 +17,9 @@ import { GeminiCliOAuthButton } from "./GeminiCliOAuthButton";
 import { OpenAICodexOAuthButton } from "./OpenAICodexOAuthButton";
 import {
   AntigravityLogoIcon,
-  ChatGptLogoIcon,
   ClaudeLogoIcon,
   GeminiLogoIcon,
+  OpenAILogoIcon,
 } from "./OAuthProviderLogos";
 import {
   useAllProvidersStatus,
@@ -370,7 +370,7 @@ export function ProviderConnectionHubButton({
                       meta={countLabel(openAiModels.length)}
                       actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
                       highlighted={isConnected || openAiModels.length > 0}
-                      icon={<ChatGptLogoIcon className="h-5 w-5" />}
+                      icon={<OpenAILogoIcon className="h-5 w-5" />}
                       onClick={openDialog}
                       isBusy={isBusy}
                       isConnected={isConnected}

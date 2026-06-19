@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { ChatGptLogoIcon } from "./OAuthProviderLogos";
+import { OpenAILogoIcon } from "./OAuthProviderLogos";
 
 type OpenAICodexOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
@@ -428,7 +428,7 @@ export function OpenAICodexOAuthButton({
           aria-label={isConnected ? "ChatGPT conectado" : "Conectar ChatGPT"}
           data-testid="button-openai-codex-oauth"
         >
-          <ChatGptLogoIcon
+          <OpenAILogoIcon
             className={isConnected ? "text-emerald-600" : "text-foreground"}
           />
         </Button>
@@ -437,7 +437,10 @@ export function OpenAICodexOAuthButton({
       <Dialog open={open} onOpenChange={resetLocalState}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Conectar ChatGPT</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <OpenAILogoIcon className="h-5 w-5" />
+              Conectar ChatGPT
+            </DialogTitle>
             <DialogDescription>
               Usa tu cuenta de <strong>ChatGPT Plus/Pro</strong> para habilitar
               OpenClaw en ILIAGPT.
@@ -517,6 +520,7 @@ export function OpenAICodexOAuthButton({
                     size="sm"
                     onClick={handleOpenAuthUrl}
                   >
+                    <OpenAILogoIcon className="h-4 w-4" />
                     <ExternalLink className="h-4 w-4" />
                     Abrir ChatGPT OAuth
                   </Button>
@@ -653,7 +657,9 @@ export function OpenAICodexOAuthButton({
               >
                 {startMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                ) : null}
+                ) : (
+                  <OpenAILogoIcon className="h-4 w-4" />
+                )}
                 Continuar con ChatGPT
               </Button>
             )}

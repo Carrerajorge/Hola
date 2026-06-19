@@ -16,7 +16,8 @@ services:
     init: true
     command: ["node", "dist/index.cjs"]
     env_file:
-      - .env.production
+      - path: .env.production
+        required: false
     environment:
       NODE_ENV: production
       APP_VERSION: ${APP_VERSION:-dev}
@@ -97,7 +98,8 @@ services:
     init: true
     command: ["node", "dist/worker.cjs"]
     env_file:
-      - .env.production
+      - path: .env.production
+        required: false
     environment:
       NODE_ENV: production
       APP_VERSION: ${APP_VERSION:-dev}
@@ -157,7 +159,8 @@ services:
     hostname: hola-${SLOT:-blue}-sandbox
     init: true
     env_file:
-      - .env.production
+      - path: .env.production
+        required: false
     environment:
       NODE_ENV: production
       APP_VERSION: ${APP_VERSION:-dev}
@@ -244,7 +247,8 @@ services:
     profiles:
       - monitoring
     env_file:
-      - .env.production
+      - path: .env.production
+        required: false
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       # Required when enabling the `monitoring` profile.

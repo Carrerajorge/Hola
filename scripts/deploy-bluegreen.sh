@@ -155,6 +155,10 @@ main() {
     log "Deploy path: ${DEPLOY_PATH}"
     
     cd "${DEPLOY_PATH}"
+
+    # Ensure .env.production exists (docker-compose env_file may reference it)
+    touch -a .env.production
+
     apply_nginx_site_config
     
     # Read current state (initialize if missing — first deploy or state was lost)
@@ -229,6 +233,9 @@ INITSTATE
         --network hola-net \
         -e DATABASE_URL="${DATABASE_URL}" \
         -e NODE_ENV=production \
+        -e SESSION_SECRET="migration-only-placeholder" \
+        -e ADMIN_EMAIL="migration@placeholder.local" \
+        -e ADMIN_PASSWORD="migration-placeholder-pw" \
         "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" \
         npm run db:migrate:deploy || true
     
