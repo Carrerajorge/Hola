@@ -118,7 +118,7 @@ openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
         if (
           parsed?.provider === "openai" &&
           parsed.ts &&
-          Date.now() - parsed.ts < 5 * 60 * 1000
+          Date.now() - parsed.ts < 30 * 60 * 1000
         ) {
           res.clearCookie("iliagpt_provider_connected_openai", { path: "/" });
           return res.json({
@@ -133,7 +133,9 @@ openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
       } catch {}
     }
 
-    res.json(await getOpenAICodexOAuthStatus(getUserId(req)));
+    let effectiveUserId: string | null = null;
+    try { effectiveUserId = getUserId(req); } catch { /* unauthenticated */ }
+    res.json(await getOpenAICodexOAuthStatus(effectiveUserId));
   } catch (error) {
     console.error("[OpenAICodexOAuth] status failed:", error);
     res

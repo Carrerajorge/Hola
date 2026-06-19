@@ -143,7 +143,8 @@ googleGeminiCliOAuthRouter.get(
   "/status",
   async (req: Request, res: Response) => {
     try {
-      const userId = getUserId(req);
+      let userId: string | null = null;
+      try { userId = getUserId(req); } catch { /* unauthenticated */ }
       const session = (req as any).session;
 
       // Fast path: check session-level Gemini connection flag first.
@@ -198,7 +199,7 @@ googleGeminiCliOAuthRouter.get(
             parsed &&
             (parsed.provider === "gemini" || parsed.provider === "antigravity") &&
             parsed.ts &&
-            Date.now() - parsed.ts < 5 * 60 * 1000
+            Date.now() - parsed.ts < 30 * 60 * 1000
           ) {
             return parsed as { provider: string; email: string | null; userId: string };
           }
@@ -211,6 +212,21 @@ googleGeminiCliOAuthRouter.get(
         // Clear the one-shot cookie so it doesn't persist beyond first check
         res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
+
+        // Re-persist to session so subsequent checks hit the fast path
+        // instead of relying on the cookie again.
+        if (session && typeof session.save === "function") {
+          try {
+            session.geminiCliConnected = {
+              hasAccessToken: true,
+              email: cookieFallback.email || null,
+              connectedAt: Date.now(),
+              userId: fallbackUserId,
+            };
+            session.save(() => {}); // fire-and-forget
+          } catch { /* best-effort */ }
+        }
+
         return res.json({
           connected: true,
           providerId: "google-gemini-cli",

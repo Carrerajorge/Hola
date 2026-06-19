@@ -290,6 +290,25 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 console.warn("[Google Auth] Failed to create audit log:", auditError);
             }
 
+            // If provider_hint is gemini or antigravity, set the session flag
+            // BEFORE the first session save so it is persisted in a single
+            // round-trip. Previous code set it inside the save callback,
+            // meaning the first save never included the flag and a second
+            // save was required (which could race or fail).
+            if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
+                const geminiConnectedFlag = {
+                    hasAccessToken: true,
+                    email: email || null,
+                    connectedAt: Date.now(),
+                    accessToken: tokens.access_token,
+                    refreshToken: tokens.refresh_token || null,
+                    expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
+                    userId: resolvedUser.id,
+                };
+                (req.session as any).geminiCliConnected = geminiConnectedFlag;
+                console.log("[Google Auth] geminiCliConnected session flag set BEFORE save for:", email);
+            }
+
             // Force session save before redirect (critical for OAuth flow).
             // Retry once on transient failure to avoid losing credentials.
             const saveSessionWithRetry = (cb: () => void) => {
@@ -330,20 +349,6 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 // If provider_hint is gemini or antigravity, persist Google tokens
                 // as Gemini CLI credentials in a single step (no second OAuth popup needed).
                 if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
-                    // Set session flag FIRST so the Gemini CLI status endpoint has
-                    // a guaranteed fallback even if the async file/DB persistence
-                    // calls below are slow or fail entirely.
-                    const geminiConnectedFlag = {
-                        hasAccessToken: true,
-                        email: email || null,
-                        connectedAt: Date.now(),
-                        accessToken: tokens.access_token,
-                        refreshToken: tokens.refresh_token || null,
-                        expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
-                        userId: resolvedUser.id,
-                    };
-                    (req.session as any).geminiCliConnected = geminiConnectedFlag;
-                    console.log("[Google Auth] geminiCliConnected session flag set for:", email);
 
                     // Persist credentials via all available methods (parallel, non-blocking)
                     const persistPromises: Promise<void>[] = [];
@@ -443,7 +448,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                             httpOnly: true,
                             secure: env.NODE_ENV === "production",
                             sameSite: "lax",
-                            maxAge: 5 * 60 * 1000,
+                            maxAge: 30 * 60 * 1000,
                             path: "/",
                         });
                         res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}`);
