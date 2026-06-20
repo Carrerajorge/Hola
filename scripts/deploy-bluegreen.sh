@@ -185,7 +185,7 @@ INITSTATE
     log "Active slot: ${ACTIVE_SLOT} (port ${ACTIVE_PORT})"
     log "Target slot: ${INACTIVE_SLOT} (port ${INACTIVE_PORT})"
     
-    # Get env vars
+    # Get env vars from .env.production (infrastructure)
     SANDBOX_RUNNER_TOKEN="$(extract_env_value .env.production SANDBOX_RUNNER_TOKEN || true)"
     REDIS_PASSWORD="$(extract_env_value .env.production REDIS_PASSWORD || true)"
     POSTGRES_USER="$(extract_env_value .env.production POSTGRES_USER || true)"
@@ -194,6 +194,35 @@ INITSTATE
     POSTGRES_USER="${POSTGRES_USER:-postgres}"
     POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
     DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
+
+    # Auth, session, and OAuth vars (required for app startup)
+    SESSION_SECRET="${SESSION_SECRET:-$(extract_env_value .env.production SESSION_SECRET || true)}"
+    TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY:-$(extract_env_value .env.production TOKEN_ENCRYPTION_KEY || true)}"
+    CANONICAL_DOMAIN="${CANONICAL_DOMAIN:-$(extract_env_value .env.production CANONICAL_DOMAIN || echo 'iliagpt.com')}"
+    BASE_URL="${BASE_URL:-$(extract_env_value .env.production BASE_URL || echo 'https://iliagpt.com')}"
+    GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(extract_env_value .env.production GOOGLE_CLIENT_ID || true)}"
+    GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(extract_env_value .env.production GOOGLE_CLIENT_SECRET || true)}"
+    ADMIN_EMAIL="${ADMIN_EMAIL:-$(extract_env_value .env.production ADMIN_EMAIL || true)}"
+    ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(extract_env_value .env.production ADMIN_PASSWORD || true)}"
+
+    # LLM API keys (read from host env first, fall back to .env.production)
+    GEMINI_API_KEY="${GEMINI_API_KEY:-$(extract_env_value .env.production GEMINI_API_KEY || true)}"
+    GOOGLE_API_KEY="${GOOGLE_API_KEY:-$(extract_env_value .env.production GOOGLE_API_KEY || true)}"
+    OPENAI_API_KEY="${OPENAI_API_KEY:-$(extract_env_value .env.production OPENAI_API_KEY || true)}"
+    OPENAI_BASE_URL="${OPENAI_BASE_URL:-$(extract_env_value .env.production OPENAI_BASE_URL || true)}"
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$(extract_env_value .env.production ANTHROPIC_API_KEY || true)}"
+    XAI_API_KEY="${XAI_API_KEY:-$(extract_env_value .env.production XAI_API_KEY || true)}"
+    OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(extract_env_value .env.production OPENROUTER_API_KEY || true)}"
+    DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-$(extract_env_value .env.production DEEPSEEK_API_KEY || true)}"
+    DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-$(extract_env_value .env.production DEEPSEEK_BASE_URL || true)}"
+    CEREBRAS_API_KEY="${CEREBRAS_API_KEY:-$(extract_env_value .env.production CEREBRAS_API_KEY || true)}"
+    CEREBRAS_BASE_URL="${CEREBRAS_BASE_URL:-$(extract_env_value .env.production CEREBRAS_BASE_URL || true)}"
+
+    export SESSION_SECRET TOKEN_ENCRYPTION_KEY CANONICAL_DOMAIN BASE_URL
+    export GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET ADMIN_EMAIL ADMIN_PASSWORD
+    export GEMINI_API_KEY GOOGLE_API_KEY OPENAI_API_KEY OPENAI_BASE_URL
+    export ANTHROPIC_API_KEY XAI_API_KEY OPENROUTER_API_KEY
+    export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
     
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
@@ -251,6 +280,25 @@ INITSTATE
     POSTGRES_USER="${POSTGRES_USER}" \
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
     POSTGRES_DB="${POSTGRES_DB}" \
+    SESSION_SECRET="${SESSION_SECRET}" \
+    TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY}" \
+    CANONICAL_DOMAIN="${CANONICAL_DOMAIN}" \
+    BASE_URL="${BASE_URL}" \
+    GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
+    GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
+    ADMIN_EMAIL="${ADMIN_EMAIL}" \
+    ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+    GEMINI_API_KEY="${GEMINI_API_KEY}" \
+    GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
+    OPENAI_API_KEY="${OPENAI_API_KEY}" \
+    OPENAI_BASE_URL="${OPENAI_BASE_URL}" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+    XAI_API_KEY="${XAI_API_KEY}" \
+    OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
+    DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY}" \
+    DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL}" \
+    CEREBRAS_API_KEY="${CEREBRAS_API_KEY}" \
+    CEREBRAS_BASE_URL="${CEREBRAS_BASE_URL}" \
         docker compose -p "hola-${INACTIVE_SLOT}" -f docker-compose.slot.yml up -d app worker sandbox-runner
     
     # Wait for health check

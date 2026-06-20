@@ -338,7 +338,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     await tokenManager.saveTokens(resolvedUser.id, "google", {
                         access_token: tokens.access_token,
                         refresh_token: tokens.refresh_token,
-                        expiry_date: Math.floor(Date.now()) + (tokens.expires_in || 3600) * 1000,
+                        expiry_date: Date.now() + (tokens.expires_in || 3600) * 1000,
                         scope: tokens.scope || "",
                     });
                 } catch (tokenSaveError: any) {
