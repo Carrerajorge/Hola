@@ -35,6 +35,29 @@ services:
       ENABLE_OPENCLAW_PLUGINS: "true"
       ENABLE_OPENCLAW_SKILLS: "true"
       ENABLE_OPENCLAW_STREAMING: "true"
+      # ── Auth & Session (required for production startup) ──
+      SESSION_SECRET: ${SESSION_SECRET}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      CANONICAL_DOMAIN: ${CANONICAL_DOMAIN:-iliagpt.com}
+      BASE_URL: ${BASE_URL:-https://iliagpt.com}
+      # ── Google OAuth ──
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # ── Admin bootstrap ──
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # ── LLM API keys ──
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CEREBRAS_BASE_URL: ${CEREBRAS_BASE_URL:-}
       # Cap Node heap so it GC-s before Docker OOM-kills the container
       NODE_OPTIONS: "--max-old-space-size=1536"
     ports:
@@ -111,6 +134,29 @@ services:
       ENABLE_OPENCLAW_PLUGINS: "true"
       ENABLE_OPENCLAW_SKILLS: "true"
       ENABLE_OPENCLAW_STREAMING: "true"
+      # ── Auth & Session (required for production startup) ──
+      SESSION_SECRET: ${SESSION_SECRET}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      CANONICAL_DOMAIN: ${CANONICAL_DOMAIN:-iliagpt.com}
+      BASE_URL: ${BASE_URL:-https://iliagpt.com}
+      # ── Google OAuth ──
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # ── Admin bootstrap ──
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # ── LLM API keys ──
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CEREBRAS_BASE_URL: ${CEREBRAS_BASE_URL:-}
     volumes:
       - uploads_data:/app/uploads
       - generated_artifacts:/app/generated_artifacts
