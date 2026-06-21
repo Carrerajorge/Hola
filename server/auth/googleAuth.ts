@@ -64,15 +64,11 @@ function normalizeLoginHint(value: unknown): string | null {
     }
 
     const normalized = value.trim().toLowerCase();
-    if (!normalized) {
+    if (!normalized || normalized.length > 320 || /\s/.test(normalized)) {
         return null;
     }
 
-    if (
-        normalized.length > 320 ||
-        /\s/.test(normalized) ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
-    ) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
         return null;
     }
 
