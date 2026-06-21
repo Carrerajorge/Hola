@@ -3,6 +3,8 @@ import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
+import { authStorage } from "./replit_integrations/auth/storage";
+import { buildSessionUserFromDbUser } from "./lib/sessionUser";
 import { ObjectStorageService } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { env } from "./config/env";
@@ -553,9 +555,9 @@ export async function registerRoutes(
       res.cookie("__iliagpt_ph", providerHint, {
         httpOnly: true,
         secure: env.NODE_ENV === "production",
-        sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+        sameSite: "lax",
         maxAge: 10 * 60 * 1000, // 10 minutes
-        path: "/api/auth",
+        path: "/",
       });
     }
 
@@ -594,14 +596,71 @@ export async function registerRoutes(
           (async () => {
             if (err || !user) {
               const failureCode = resolveGoogleAuthFailureCode(err, info);
-              if (err || info) {
-                console.warn("[Auth] Google callback failed:", {
-                  failureCode,
-                  error: err instanceof Error ? err.message : err || null,
-                  info,
-                });
+
+              // ── State-mismatch recovery ──
+              // When the session store loses the Passport CSRF state (PG hiccup,
+              // cookie not sent, etc.), recover by manually exchanging the code
+              // for tokens and completing the login without Passport.
+              if (
+                failureCode === "google_state_failed" &&
+                typeof req.query.code === "string" &&
+                req.query.code.trim()
+              ) {
+                console.info("[Auth] Attempting state-mismatch recovery for Google OAuth");
+                try {
+                  const { manualGoogleTokenExchange, fetchGoogleUserInfo } =
+                    await import("./lib/auth/oauthStateRecovery");
+                  const tokens = await manualGoogleTokenExchange(
+                    req.query.code as string,
+                    callbackURLCb,
+                  );
+                  const googleUser = await fetchGoogleUserInfo(tokens.access_token);
+                  if (!googleUser.email) {
+                    return res.redirect("/login?error=google_profile_failed");
+                  }
+                  const recoveredUser = await authStorage.upsertUser({
+                    id: `google_${googleUser.id}`,
+                    email: googleUser.email,
+                    username: googleUser.email.split("@")[0],
+                    fullName: googleUser.name || null,
+                    firstName: googleUser.given_name || "",
+                    lastName: googleUser.family_name || "",
+                    profileImageUrl: googleUser.picture || null,
+                    authProvider: "google",
+                    emailVerified: googleUser.verified_email ? "true" : "false",
+                  });
+                  const baseUser = buildSessionUserFromDbUser(recoveredUser);
+                  const recoveredSessionUser = {
+                    ...baseUser,
+                    claims: {
+                      ...baseUser.claims,
+                      name: googleUser.name,
+                      picture: googleUser.picture,
+                    },
+                    _googleOAuthTokens: {
+                      access_token: tokens.access_token,
+                      refresh_token: tokens.refresh_token,
+                      expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                    },
+                  };
+                  // Re-assign user/err so the rest of the handler continues normally
+                  user = recoveredSessionUser;
+                  err = null;
+                  console.info("[Auth] State-mismatch recovery succeeded for:", googleUser.email);
+                } catch (recoveryError: any) {
+                  console.error("[Auth] State-mismatch recovery failed:", recoveryError?.message || recoveryError);
+                  return res.redirect("/login?error=google_state_failed");
+                }
+              } else {
+                if (err || info) {
+                  console.warn("[Auth] Google callback failed:", {
+                    failureCode,
+                    error: err instanceof Error ? err.message : err || null,
+                    info,
+                  });
+                }
+                return res.redirect(`/login?error=${failureCode}`);
               }
-              return res.redirect(`/login?error=${failureCode}`);
             }
 
             const userId = user?.claims?.sub || user?.id;
@@ -671,7 +730,7 @@ export async function registerRoutes(
               }
               // Clear the backup cookie
               if (phFromCookie) {
-                res.clearCookie("__iliagpt_ph", { path: "/api/auth" });
+                res.clearCookie("__iliagpt_ph", { path: "/" });
               }
 
               // Build redirect URL: if the user came from a specific provider button,
