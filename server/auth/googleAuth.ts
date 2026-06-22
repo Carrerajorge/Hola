@@ -459,7 +459,14 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 // stale data and trigger a redundant OAuth popup.
                 req.session.save((saveErr2: any) => {
                     if (saveErr2) {
-                        console.warn("[Google Auth] Final session save before redirect failed:", saveErr2);
+                        console.warn("[Google Auth] Final session save before redirect failed, retrying:", saveErr2);
+                        req.session.save((saveErr3: any) => {
+                            if (saveErr3) {
+                                console.warn("[Google Auth] Final session save retry also failed:", saveErr3);
+                            }
+                            doRedirect();
+                        });
+                        return;
                     }
                     doRedirect();
                 });

@@ -112,6 +112,20 @@ async function resolveStoredProfile(userId?: string | null) {
     } catch {
       // DB might not have the oauth tables yet
     }
+
+    // Second fallback: check tokenManager for stored Google tokens
+    try {
+      const { tokenManager } = await import("../lib/auth/tokenManager.js");
+      const googleTokens = await tokenManager.getTokens(userId, "google");
+      if (googleTokens?.access_token) {
+        return {
+          profileId: `${PROVIDER_ID}:token-manager-fallback`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "token-manager" },
+        };
+      }
+    } catch {
+      // Token manager also unavailable
+    }
   }
 
   return null;

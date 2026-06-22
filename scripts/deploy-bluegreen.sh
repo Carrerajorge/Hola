@@ -158,6 +158,8 @@ main() {
 
     # Ensure .env.production exists (docker-compose env_file may reference it)
     touch -a .env.production
+    # Source dotenv-style vars so they are available as shell vars
+    set -a; source .env.production 2>/dev/null || true; set +a
 
     apply_nginx_site_config
     
@@ -223,7 +225,22 @@ INITSTATE
     export GEMINI_API_KEY GOOGLE_API_KEY OPENAI_API_KEY OPENAI_BASE_URL
     export ANTHROPIC_API_KEY XAI_API_KEY OPENROUTER_API_KEY
     export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
-    
+
+    # Validate required environment variables
+    MISSING_VARS=""
+    if [ -z "${SESSION_SECRET}" ]; then
+        MISSING_VARS="${MISSING_VARS}  - SESSION_SECRET\n"
+    fi
+    if [ -z "${ADMIN_EMAIL}" ]; then
+        MISSING_VARS="${MISSING_VARS}  - ADMIN_EMAIL\n"
+    fi
+    if [ -n "${MISSING_VARS}" ]; then
+        error "Required environment variables are missing or empty:"
+        echo -e "${MISSING_VARS}" >&2
+        error "Please configure them in .env.production at ${DEPLOY_PATH}"
+        exit 1
+    fi
+
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
