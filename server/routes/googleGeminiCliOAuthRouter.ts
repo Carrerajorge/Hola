@@ -219,6 +219,7 @@ googleGeminiCliOAuthRouter.get(
           try {
             session.geminiCliConnected = {
               hasAccessToken: true,
+              accessToken: "from-cookie-fallback",
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,
