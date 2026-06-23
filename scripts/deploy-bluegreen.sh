@@ -226,19 +226,18 @@ INITSTATE
     export ANTHROPIC_API_KEY XAI_API_KEY OPENROUTER_API_KEY
     export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
 
-    # Validate required environment variables
-    MISSING_VARS=""
+    # Auto-generate missing required environment variables
     if [ -z "${SESSION_SECRET}" ]; then
-        MISSING_VARS="${MISSING_VARS}  - SESSION_SECRET\n"
+        SESSION_SECRET="$(openssl rand -hex 32)"
+        echo "SESSION_SECRET=${SESSION_SECRET}" >> "${DEPLOY_PATH}/.env.production"
+        export SESSION_SECRET
+        warn "SESSION_SECRET was missing — generated a secure random value and appended to .env.production"
     fi
     if [ -z "${ADMIN_EMAIL}" ]; then
-        MISSING_VARS="${MISSING_VARS}  - ADMIN_EMAIL\n"
-    fi
-    if [ -n "${MISSING_VARS}" ]; then
-        error "Required environment variables are missing or empty:"
-        echo -e "${MISSING_VARS}" >&2
-        error "Please configure them in .env.production at ${DEPLOY_PATH}"
-        exit 1
+        ADMIN_EMAIL="admin@iliagpt.com"
+        echo "ADMIN_EMAIL=${ADMIN_EMAIL}" >> "${DEPLOY_PATH}/.env.production"
+        export ADMIN_EMAIL
+        warn "ADMIN_EMAIL was missing — defaulted to ${ADMIN_EMAIL} and appended to .env.production"
     fi
 
     # Clean up old docker artifacts to prevent disk exhaustion

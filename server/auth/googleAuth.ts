@@ -439,6 +439,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                             email: email || null,
                             userId: resolvedUser.id,
                             ts: Date.now(),
+                            accessToken: tokens.access_token,
+                            refreshToken: tokens.refresh_token || null,
+                            expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
                         }));
                         res.cookie(cookieName, cookieValue, {
                             httpOnly: true,

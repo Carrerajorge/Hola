@@ -108,8 +108,12 @@ function renderOpenAICodexOAuthBridge(
 
 openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
   try {
-    // Cookie fallback: set by Google OAuth callback with provider_hint=openai.
-    // Survives even when the session/DB store hasn't propagated yet.
+    // Cookie cleanup: the Google OAuth callback sets iliagpt_provider_connected_openai
+    // when provider_hint=openai. Unlike Gemini, the Google tokens are NOT valid
+    // OpenAI credentials, so we must NOT return connected: true based on this
+    // cookie alone. Instead, consume (clear) the cookie and fall through to the
+    // real status check. The auto-connect flow on the client will then see
+    // connected: false and correctly start the actual OpenAI OAuth flow.
     const cookies = req.cookies || (req.headers.cookie ? parseCookie(req.headers.cookie) : {});
     const cookieRaw = cookies.iliagpt_provider_connected_openai;
     if (cookieRaw) {
@@ -120,15 +124,9 @@ openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
           parsed.ts &&
           Date.now() - parsed.ts < 30 * 60 * 1000
         ) {
+          // Clear the one-shot cookie so it doesn't persist
           res.clearCookie("iliagpt_provider_connected_openai", { path: "/" });
-          return res.json({
-            connected: true,
-            providerId: "openai-codex",
-            defaultModelRef: "openai-codex/gpt-5.4",
-            defaultModelId: "gpt-5.4",
-            profileId: "cookie-fallback",
-            accountId: null,
-          });
+          // Fall through to real status check below (do NOT return connected: true)
         }
       } catch {}
     }
