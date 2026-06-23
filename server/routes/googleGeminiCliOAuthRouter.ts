@@ -201,7 +201,7 @@ googleGeminiCliOAuthRouter.get(
             parsed.ts &&
             Date.now() - parsed.ts < 30 * 60 * 1000
           ) {
-            return parsed as { provider: string; email: string | null; userId: string };
+            return parsed as { provider: string; email: string | null; userId: string; accessToken?: string; refreshToken?: string | null; expiresAt?: number | null };
           }
         } catch {}
         return null;
@@ -213,13 +213,32 @@ googleGeminiCliOAuthRouter.get(
         res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
+        const realAccessToken = cookieFallback.accessToken || null;
+        const realRefreshToken = cookieFallback.refreshToken || null;
+        const realExpiresAt = cookieFallback.expiresAt || null;
+
+        // Persist the real tokens to DB if available
+        if (realAccessToken && fallbackUserId) {
+          persistGeminiCliCredentialsFromGoogleTokens(
+            fallbackUserId,
+            cookieFallback.email || undefined,
+            {
+              access_token: realAccessToken,
+              refresh_token: realRefreshToken || undefined,
+              expires_at: realExpiresAt || undefined,
+            },
+          ).catch(() => {});
+        }
+
         // Re-persist to session so subsequent checks hit the fast path
         // instead of relying on the cookie again.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
-              hasAccessToken: true,
-              accessToken: "from-cookie-fallback",
+              hasAccessToken: Boolean(realAccessToken),
+              accessToken: realAccessToken || "from-cookie-fallback",
+              refreshToken: realRefreshToken,
+              expiresAt: realExpiresAt,
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,
