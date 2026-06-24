@@ -108,6 +108,24 @@ function renderOpenAICodexOAuthBridge(
 
 openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
   try {
+      // Session-level fast path (set by Google OAuth callback with provider_hint=openai)
+      const session = (req as any).session;
+      const sessionOpenai = session?.openaiCodexConnected;
+      if (
+        sessionOpenai &&
+        sessionOpenai.hasAccessToken &&
+        Date.now() - (sessionOpenai.connectedAt || 0) < 24 * 3600 * 1000
+      ) {
+        return res.json({
+          connected: true,
+          providerId: "openai-codex",
+          defaultModelRef: "openai-codex/gpt-5.4",
+          defaultModelId: "gpt-5.4",
+          profileId: "session-fallback",
+          accountId: null,
+        });
+      }
+
     // Cookie fallback: set by Google OAuth callback with provider_hint=openai.
     // Survives even when the session/DB store hasn't propagated yet.
     const cookies = req.cookies || (req.headers.cookie ? parseCookie(req.headers.cookie) : {});

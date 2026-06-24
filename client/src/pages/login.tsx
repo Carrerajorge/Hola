@@ -314,9 +314,8 @@ export default function LoginPage() {
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
   };
 
-  // OpenAI login is handled via handleGoogleLogin("openai") which first
-  // authenticates with Google, then auto-opens the OpenAI connection dialog
-  // on the home page after redirect.
+  // OpenAI/ChatGPT login: authenticates with Google first (the user selects their Gmail account),
+  // then auto-connects ChatGPT credentials via the home page after redirect.
 
   const handleMagicLink = async () => {
     if (!email) {

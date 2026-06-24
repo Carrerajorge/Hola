@@ -134,7 +134,7 @@ export default function Home() {
         );
       } catch {}
       // Extended to 8 attempts with longer tail to cover slow networks.
-      const delays = [400, 800, 1400, 2200, 3500, 5500, 8000, 12000];
+      const delays = [0, 400, 800, 1400, 2200, 3500, 5500, 8000, 12000];
       const timers: number[] = [];
       for (const delay of delays) {
         timers.push(window.setTimeout(() => {
