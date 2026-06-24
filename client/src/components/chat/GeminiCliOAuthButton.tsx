@@ -397,16 +397,28 @@ export function GeminiCliOAuthButton({
     useQuery<GeminiCliStatusResponse>({
       queryKey: STATUS_QUERY_KEY,
       queryFn: async () => {
-        const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          const payload = await res.json().catch(() => ({}));
-          throw new Error(
-            payload?.error || "No se pudo consultar Gemini CLI OAuth",
-          );
+        const [cliRes, providerRes] = await Promise.all([
+          apiFetch("/api/oauth/google/gemini-cli/status", { cache: "no-store" }).catch(() => null),
+          apiFetch("/api/oauth/providers/gemini/status", { cache: "no-store" }).catch(() => null),
+        ]);
+        const cliStatus: GeminiCliStatusResponse | null = cliRes?.ok
+          ? await cliRes.json().catch(() => null)
+          : null;
+        const providerStatus: { connected?: boolean } | null = providerRes?.ok
+          ? await providerRes.json().catch(() => null)
+          : null;
+        if (cliStatus) {
+          if (!cliStatus.connected && providerStatus?.connected) {
+            return { ...cliStatus, connected: true };
+          }
+          return cliStatus;
         }
-        return res.json();
+        return {
+          connected: providerStatus?.connected ?? false,
+          email: null,
+          profileId: null,
+          defaultModelId: "gemini-3.1-pro-preview",
+        };
       },
       staleTime: autoStart ? 0 : 30_000,
       refetchOnWindowFocus: false,

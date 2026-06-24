@@ -414,6 +414,27 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     } catch (dbError: any) {
                         console.warn("[Google Auth] OpenAI DB token persistence failed (non-blocking):", dbError?.message || dbError);
                     }
+
+                    // Also persist to the database-backed provider service so the
+                    // /api/oauth/providers/status endpoint reflects the connection
+                    // and the auto-connect dialog doesn't open a redundant popup.
+                    try {
+                        const { providersService } = await import("../services/providersService.js");
+                        const expiresAt = tokens.expires_in
+                            ? Date.now() + tokens.expires_in * 1000
+                            : null;
+                        await providersService.saveUserToken(
+                            resolvedUser.id,
+                            "gemini",
+                            tokens.access_token,
+                            tokens.refresh_token || null,
+                            expiresAt,
+                            "https://www.googleapis.com/auth/generative-language",
+                        );
+                        console.log("[Google Auth] Gemini provider token saved to DB for:", email);
+                    } catch (dbError: any) {
+                        console.warn("[Google Auth] Gemini DB token save failed (non-blocking):", dbError?.message || dbError);
+                    }
                 }
 
                 // If a provider_hint was set during login, redirect to a post-login
