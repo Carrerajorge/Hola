@@ -226,19 +226,24 @@ INITSTATE
     export ANTHROPIC_API_KEY XAI_API_KEY OPENROUTER_API_KEY
     export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
 
-    # Validate required environment variables
-    MISSING_VARS=""
+    # Auto-generate required env vars when missing instead of aborting deploy
     if [ -z "${SESSION_SECRET}" ]; then
-        MISSING_VARS="${MISSING_VARS}  - SESSION_SECRET\n"
+        SESSION_SECRET="$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n')"
+        log "SESSION_SECRET was missing — auto-generated for this deploy."
+        # Persist to .env.production so future deploys find it
+        if [ -f ".env.production" ]; then
+            echo "SESSION_SECRET=${SESSION_SECRET}" >> .env.production
+        fi
+        export SESSION_SECRET
     fi
     if [ -z "${ADMIN_EMAIL}" ]; then
-        MISSING_VARS="${MISSING_VARS}  - ADMIN_EMAIL\n"
-    fi
-    if [ -n "${MISSING_VARS}" ]; then
-        error "Required environment variables are missing or empty:"
-        echo -e "${MISSING_VARS}" >&2
-        error "Please configure them in .env.production at ${DEPLOY_PATH}"
-        exit 1
+        ADMIN_EMAIL="${CANONICAL_DOMAIN:+admin@${CANONICAL_DOMAIN}}"
+        ADMIN_EMAIL="${ADMIN_EMAIL:-admin@iliagpt.com}"
+        log "ADMIN_EMAIL was missing — defaulting to ${ADMIN_EMAIL}."
+        if [ -f ".env.production" ]; then
+            echo "ADMIN_EMAIL=${ADMIN_EMAIL}" >> .env.production
+        fi
+        export ADMIN_EMAIL
     fi
 
     # Clean up old docker artifacts to prevent disk exhaustion

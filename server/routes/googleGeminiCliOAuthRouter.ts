@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from "express";
 import { requireAdmin } from "./admin/utils";
 import { getUserId } from "../types/express";
 import { parse as parseCookie } from "cookie";
+import { env } from "../config/env";
 import {
   clearExpiredGeminiCliOAuthCompletedStore,
   clearExpiredGeminiCliOAuthFlows,
@@ -156,10 +157,10 @@ googleGeminiCliOAuthRouter.get(
       if (
         sessionGemini &&
         sessionGemini.hasAccessToken &&
-        Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
+        Date.now() - (sessionGemini.connectedAt || 0) < 7 * 24 * 3600 * 1000
       ) {
-        const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
-        if (sessionGemini.accessToken && fastPathUserId) {
+        const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId || null;
+        if (fastPathUserId && sessionGemini.accessToken) {
           // Normalize expiresAt: values < 1e12 are seconds, convert to ms
           const normalizedExpiresAt = sessionGemini.expiresAt
             ? (sessionGemini.expiresAt > 1e12 ? sessionGemini.expiresAt : sessionGemini.expiresAt * 1000)
@@ -209,23 +210,27 @@ googleGeminiCliOAuthRouter.get(
 
       if (cookieFallback) {
         const fallbackUserId = userId || cookieFallback.userId;
-        // Clear the one-shot cookie so it doesn't persist beyond first check
         res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
-        // Re-persist to session so subsequent checks hit the fast path
-        // instead of relying on the cookie again.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
               hasAccessToken: true,
-              accessToken: "from-cookie-fallback",
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,
             };
-            session.save(() => {}); // fire-and-forget
+            session.save(() => {});
           } catch { /* best-effort */ }
+        }
+
+        if (fallbackUserId) {
+          persistGeminiCliCredentialsFromGoogleTokens(
+            fallbackUserId,
+            cookieFallback.email || undefined,
+            undefined,
+          ).catch(() => {});
         }
 
         return res.json({
@@ -471,6 +476,32 @@ googleGeminiCliOAuthRouter.post(
         responsePayload,
       );
       saveGeminiCliOAuthCompleted(flowId, userId, responsePayload);
+
+      const session = (req as any).session;
+      if (session) {
+        session.geminiCliConnected = {
+          hasAccessToken: true,
+          email: status.email || null,
+          connectedAt: Date.now(),
+          userId,
+        };
+      }
+
+      const cookieName = "iliagpt_provider_connected_gemini";
+      const cookieValue = encodeURIComponent(JSON.stringify({
+        provider: "gemini",
+        email: status.email || null,
+        userId,
+        ts: Date.now(),
+      }));
+      res.cookie(cookieName, cookieValue, {
+        httpOnly: true,
+        secure: env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 30 * 60 * 1000,
+        path: "/",
+      });
+
       await saveSession(req);
 
       res.json(responsePayload);
