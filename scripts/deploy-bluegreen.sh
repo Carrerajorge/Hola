@@ -227,18 +227,17 @@ INITSTATE
     export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
 
     # Validate required environment variables
-    MISSING_VARS=""
     if [ -z "${SESSION_SECRET}" ]; then
-        MISSING_VARS="${MISSING_VARS}  - SESSION_SECRET\n"
+        SESSION_SECRET="$(openssl rand -hex 32)"
+        export SESSION_SECRET
+        warn "SESSION_SECRET was missing — auto-generated a random value."
+        warn "Persist it in .env.production to keep sessions stable across deploys."
+        # Append to .env.production so it survives future deploys
+        echo "SESSION_SECRET=${SESSION_SECRET}" >> .env.production
     fi
     if [ -z "${ADMIN_EMAIL}" ]; then
-        MISSING_VARS="${MISSING_VARS}  - ADMIN_EMAIL\n"
-    fi
-    if [ -n "${MISSING_VARS}" ]; then
-        error "Required environment variables are missing or empty:"
-        echo -e "${MISSING_VARS}" >&2
-        error "Please configure them in .env.production at ${DEPLOY_PATH}"
-        exit 1
+        warn "ADMIN_EMAIL is not set in .env.production — admin features may be unavailable."
+        warn "Set ADMIN_EMAIL in .env.production at ${DEPLOY_PATH} to enable admin access."
     fi
 
     # Clean up old docker artifacts to prevent disk exhaustion

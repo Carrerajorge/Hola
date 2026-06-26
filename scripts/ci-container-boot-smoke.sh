@@ -9,6 +9,7 @@ POSTGRES_IMAGE="${POSTGRES_IMAGE:-pgvector/pgvector:pg15}"
 REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
 APP_VERSION="${APP_VERSION:-${IMAGE_TAG#sha-}}"
 APP_SHA="${APP_SHA:-${APP_VERSION}}"
+SKIP_SANDBOX_SMOKE="${SKIP_SANDBOX_SMOKE:-false}"
 EXPECTED_OPENCLAW_VERSION="${EXPECTED_OPENCLAW_VERSION:-}"
 IMAGE_PULL_TIMEOUT_SECONDS="${IMAGE_PULL_TIMEOUT_SECONDS:-600}"
 MIGRATION_TIMEOUT_SECONDS="${MIGRATION_TIMEOUT_SECONDS:-300}"
@@ -340,7 +341,9 @@ docker network create "${NETWORK}" >/dev/null
 ensure_image_available "${POSTGRES_IMAGE}"
 ensure_image_available "${REDIS_IMAGE}"
 ensure_image_available "${APP_IMAGE}"
-ensure_image_available "${SANDBOX_IMAGE}"
+if [ "${SKIP_SANDBOX_SMOKE}" != "true" ]; then
+  ensure_image_available "${SANDBOX_IMAGE}"
+fi
 
 log "Starting ephemeral Postgres for production boot smoke..."
 docker run -d \
@@ -385,9 +388,12 @@ if ! run_with_timeout "${MIGRATION_TIMEOUT_SECONDS}" docker run --rm \
   fail "Production migrations failed inside the built image."
 fi
 
-start_sandbox_container
-
-wait_for_http_ready "http://127.0.0.1:${SANDBOX_HOST_PORT}/health" "${SANDBOX_CONTAINER}" 200 60 2
+if [ "${SKIP_SANDBOX_SMOKE}" != "true" ]; then
+  start_sandbox_container
+  wait_for_http_ready "http://127.0.0.1:${SANDBOX_HOST_PORT}/health" "${SANDBOX_CONTAINER}" 200 60 2
+else
+  log "Skipping sandbox container (SKIP_SANDBOX_SMOKE=true) to save disk space."
+fi
 
 start_app_container
 

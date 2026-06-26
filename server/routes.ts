@@ -722,6 +722,18 @@ export async function registerRoutes(
                   req.cookies = parseCookie(req.headers.cookie);
                 }
                 phFromCookie = req.cookies?.["__iliagpt_ph"] || "";
+                // If req.cookies was already parsed by middleware but missed
+                // the cookie (e.g. different parsing behavior), fall back to
+                // parsing the raw Cookie header directly.
+                if (!phFromCookie && req.headers.cookie) {
+                  try {
+                    const { parse: parseCookie } = await import("cookie");
+                    const rawParsed = parseCookie(req.headers.cookie);
+                    phFromCookie = rawParsed["__iliagpt_ph"] || "";
+                  } catch {
+                    // Ignore parse errors on raw cookie header
+                  }
+                }
               }
               const providerHint = sess?.providerHint || phFromCookie;
               // Clear after use so it doesn't persist across sessions.
@@ -755,6 +767,13 @@ export async function registerRoutes(
               if (providerHint === "gemini" || providerHint === "antigravity") {
                 // Extract direct tokens from the user object (attached by passport strategy)
                 const directTokens = (user as any)?._googleOAuthTokens ?? null;
+                if (!directTokens) {
+                  console.warn(
+                    "[Auth] No _googleOAuthTokens found on user object for provider hint:",
+                    providerHint,
+                    "– user will still be logged in but Gemini credential persistence may be incomplete.",
+                  );
+                }
                 let geminiPersisted = false;
                 try {
                   const { persistGoogleTokensAsGeminiCli } = await import(

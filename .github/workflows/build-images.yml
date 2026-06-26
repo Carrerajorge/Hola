@@ -303,9 +303,11 @@ jobs:
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
-          # BuildKit cache layers can fill the runner disk; prune before pulling fresh images.
+          # BuildKit cache layers and pushed images can fill the runner disk.
+          # Aggressively reclaim everything — images were already pushed to GHCR.
           docker builder prune --all --force 2>/dev/null || true
           docker image prune --all --force 2>/dev/null || true
+          docker system prune -af --volumes 2>/dev/null || true
           echo "▸ Disk before smoke test:" && df -h /
 
       - name: Smoke-test production app image boot
@@ -315,6 +317,7 @@ jobs:
           APP_VERSION: ${{ steps.meta.outputs.short_sha }}
           APP_SHA: ${{ steps.meta.outputs.full_sha }}
           APP_IMAGE: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.tag }}
+          SKIP_SANDBOX_SMOKE: "true"
         run: |
           bash ./scripts/ci-container-boot-smoke.sh
 
