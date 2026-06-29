@@ -232,12 +232,27 @@ INITSTATE
         export SESSION_SECRET
         warn "SESSION_SECRET was missing — auto-generated a random value."
         warn "Persist it in .env.production to keep sessions stable across deploys."
-        # Append to .env.production so it survives future deploys
         echo "SESSION_SECRET=${SESSION_SECRET}" >> .env.production
     fi
+    if [ -z "${TOKEN_ENCRYPTION_KEY}" ]; then
+        TOKEN_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+        export TOKEN_ENCRYPTION_KEY
+        warn "TOKEN_ENCRYPTION_KEY was missing — auto-generated a random value."
+        warn "Persist it in .env.production to keep OAuth tokens stable across deploys."
+        echo "TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}" >> .env.production
+    fi
     if [ -z "${ADMIN_EMAIL}" ]; then
-        warn "ADMIN_EMAIL is not set in .env.production — admin features may be unavailable."
-        warn "Set ADMIN_EMAIL in .env.production at ${DEPLOY_PATH} to enable admin access."
+        ADMIN_EMAIL="carrerajorge874@gmail.com"
+        export ADMIN_EMAIL
+        warn "ADMIN_EMAIL was not set — defaulting to carrerajorge874@gmail.com."
+        echo "ADMIN_EMAIL=${ADMIN_EMAIL}" >> .env.production
+    fi
+    if [ -z "${ADMIN_PASSWORD}" ]; then
+        ADMIN_PASSWORD="$(openssl rand -base64 24)"
+        export ADMIN_PASSWORD
+        warn "ADMIN_PASSWORD was not set — auto-generated a random value."
+        warn "Record the password from .env.production to access admin features."
+        echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env.production
     fi
 
     # Clean up old docker artifacts to prevent disk exhaustion

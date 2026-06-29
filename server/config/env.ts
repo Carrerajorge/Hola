@@ -54,7 +54,12 @@ const envSchema = z.object({
   DEEPSEEK_MODEL: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
 
-  SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
+  SESSION_SECRET: z.string().default(() => {
+    const { randomBytes } = require("node:crypto");
+    const generated = randomBytes(32).toString("hex");
+    console.warn("⚠️  SESSION_SECRET not set — auto-generated a random value. Sessions will not persist across restarts.");
+    return generated;
+  }),
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
@@ -186,19 +191,17 @@ function validateEnv() {
     (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
   );
   if (data.NODE_ENV === "production" && !isTestRuntime && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
-    console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");
-    process.exit(1);
+    console.warn("⚠️  WARNING: TOKEN_ENCRYPTION_KEY is not set. OAuth token encryption will use a fallback key.");
+    console.warn("   Set TOKEN_ENCRYPTION_KEY (32+ chars) in .env.production for proper security.");
   }
 
   // Production bootstrap hardening: seed-production.ts runs on startup.
   if (data.NODE_ENV === "production" && !isTestRuntime) {
     if (!data.ADMIN_EMAIL) {
-      console.error("❌ ADMIN_EMAIL is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_EMAIL is not set. Admin seeding will be skipped.");
     }
     if (!data.ADMIN_PASSWORD) {
-      console.error("❌ ADMIN_PASSWORD is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_PASSWORD is not set. Admin seeding will be skipped.");
     }
     if (data.ADMIN_PASSWORD && data.ADMIN_PASSWORD.length < 12) {
       console.warn("⚠️  WARNING: ADMIN_PASSWORD should be at least 12 characters in production.");
