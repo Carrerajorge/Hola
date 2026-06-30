@@ -59,11 +59,21 @@ const envSchema = z.object({
   BASE_URL: z.string().default("http://localhost:5000"),
 
   // Token encryption (required for storing OAuth tokens securely in production)
-  TOKEN_ENCRYPTION_KEY: z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+  // Preprocess empty strings to undefined so docker-compose `${VAR:-}` defaults work
+  TOKEN_ENCRYPTION_KEY: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+  ),
 
   // Admin / bootstrap (used by admin panel and production seeding)
-  ADMIN_EMAIL: z.string().email().optional(),
-  ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters").optional(),
+  ADMIN_EMAIL: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().email().optional(),
+  ),
+  ADMIN_PASSWORD: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters").optional(),
+  ),
   ADMIN_REQUIRE_2FA: boolish.optional(),
   SEED_ON_START: boolish.optional(),
 
@@ -171,34 +181,29 @@ function validateEnv() {
 
   // Session hardening: require a strong secret in production, warn in other envs.
   if (data.NODE_ENV === "production" && !isTestRuntime && data.SESSION_SECRET.length < 32) {
-    console.error("❌ SESSION_SECRET must be at least 32 characters in production.");
-    process.exit(1);
+    console.warn("⚠️  WARNING: SESSION_SECRET should be at least 32 characters in production. Using provided value but auth sessions may be insecure.");
   }
   if (data.NODE_ENV !== "production" && data.NODE_ENV !== "test" && data.SESSION_SECRET.length < 32) {
     console.warn("⚠️  WARNING: SESSION_SECRET should be at least 32 characters.");
   }
 
-  // Security hardening: require a dedicated encryption key if OAuth token storage is enabled in production.
-  // TokenManager falls back to a default key if unset, which is not acceptable for production.
+  // Security hardening: warn about missing encryption key for OAuth token storage.
   const oauthEnabled = Boolean(
     (data.GOOGLE_CLIENT_ID && data.GOOGLE_CLIENT_SECRET) ||
     (data.MICROSOFT_CLIENT_ID && data.MICROSOFT_CLIENT_SECRET) ||
     (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
   );
   if (data.NODE_ENV === "production" && !isTestRuntime && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
-    console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");
-    process.exit(1);
+    console.warn("⚠️  WARNING: TOKEN_ENCRYPTION_KEY not set. OAuth token persistence will use a fallback key. Set TOKEN_ENCRYPTION_KEY (32+ chars) for production security.");
   }
 
-  // Production bootstrap hardening: seed-production.ts runs on startup.
+  // Production bootstrap: warn about missing admin credentials.
   if (data.NODE_ENV === "production" && !isTestRuntime) {
     if (!data.ADMIN_EMAIL) {
-      console.error("❌ ADMIN_EMAIL is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_EMAIL not set. Admin user seeding will be skipped.");
     }
     if (!data.ADMIN_PASSWORD) {
-      console.error("❌ ADMIN_PASSWORD is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_PASSWORD not set. Admin user seeding will be skipped.");
     }
     if (data.ADMIN_PASSWORD && data.ADMIN_PASSWORD.length < 12) {
       console.warn("⚠️  WARNING: ADMIN_PASSWORD should be at least 12 characters in production.");

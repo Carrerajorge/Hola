@@ -115,10 +115,7 @@ export async function seedProductionData(): Promise<SeedResult> {
   }
 
   if (!ADMIN_EMAIL_RAW) {
-    const msg = "ADMIN_EMAIL not configured — required for production seeding";
-    result.errors.push(msg);
-    logSeed("error", msg);
-    return result;
+    logSeed("info", "ADMIN_EMAIL not configured — skipping admin user seeding (models will still sync)");
   }
 
   logSeed("info", "Starting production seed...");
@@ -135,45 +132,48 @@ export async function seedProductionData(): Promise<SeedResult> {
       if (!hasUsersTable) {
         result.userMissing = true;
         logSeed("warn", "Users table missing; skipping admin seed");
+      } else if (!ADMIN_EMAIL_RAW) {
+        logSeed("info", "No ADMIN_EMAIL; skipping admin user seed");
       } else {
         const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-        if (!ADMIN_PASSWORD && process.env.NODE_ENV === "production") {
-          throw new Error("ADMIN_PASSWORD not configured — required in production");
-        }
-        const bcrypt = await import("bcrypt");
-        const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD || "admin", 12);
-
-        const existingUser = await withRetry(() =>
-          db.select({ id: users.id, email: users.email, role: users.role })
-            .from(users)
-            .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
-            .limit(1)
-        );
-
-        if (existingUser.length > 0) {
-          await withRetry(() =>
-            db.update(users)
-              .set({ role: "admin", password: hashedPassword })
-              .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
-          );
-          result.userUpdated = true;
-          logSeed("info", "Admin user updated", { email: ADMIN_EMAIL });
+        if (!ADMIN_PASSWORD) {
+          logSeed("warn", "ADMIN_PASSWORD not configured; skipping admin user seed");
         } else {
-          await withRetry(() =>
-            db.insert(users).values({
-              email: ADMIN_EMAIL,
-              password: hashedPassword,
-              role: "admin",
-              username: "admin",
-              firstName: "Admin",
-              lastName: "User",
-              status: "active",
-              emailVerified: "true",
-              authProvider: "email",
-            })
+          const bcrypt = await import("bcrypt");
+          const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
+
+          const existingUser = await withRetry(() =>
+            db.select({ id: users.id, email: users.email, role: users.role })
+              .from(users)
+              .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
+              .limit(1)
           );
-          result.userUpdated = true;
-          logSeed("info", "Admin user created", { email: ADMIN_EMAIL });
+
+          if (existingUser.length > 0) {
+            await withRetry(() =>
+              db.update(users)
+                .set({ role: "admin", password: hashedPassword })
+                .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
+            );
+            result.userUpdated = true;
+            logSeed("info", "Admin user updated", { email: ADMIN_EMAIL });
+          } else {
+            await withRetry(() =>
+              db.insert(users).values({
+                email: ADMIN_EMAIL,
+                password: hashedPassword,
+                role: "admin",
+                username: "admin",
+                firstName: "Admin",
+                lastName: "User",
+                status: "active",
+                emailVerified: "true",
+                authProvider: "email",
+              })
+            );
+            result.userUpdated = true;
+            logSeed("info", "Admin user created", { email: ADMIN_EMAIL });
+          }
         }
       }
     } catch (error) {
