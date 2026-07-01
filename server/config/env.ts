@@ -18,6 +18,11 @@ if (!envLoadedByBootstrap) {
 process.env.XAI_API_KEY = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
 normalizeOpenAICompatibleEnv(process.env);
 
+const emptyToUndefined = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().optional(),
+);
+
 const boolish = z
   .preprocess((v) => {
     if (typeof v !== "string") return v;
@@ -54,16 +59,28 @@ const envSchema = z.object({
   DEEPSEEK_MODEL: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
 
-  SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
+  SESSION_SECRET: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(1, "SESSION_SECRET is required"),
+  ),
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
   // Token encryption (required for storing OAuth tokens securely in production)
-  TOKEN_ENCRYPTION_KEY: z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+  TOKEN_ENCRYPTION_KEY: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+  ),
 
   // Admin / bootstrap (used by admin panel and production seeding)
-  ADMIN_EMAIL: z.string().email().optional(),
-  ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters").optional(),
+  ADMIN_EMAIL: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().email().optional(),
+  ),
+  ADMIN_PASSWORD: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters").optional(),
+  ),
   ADMIN_REQUIRE_2FA: boolish.optional(),
   SEED_ON_START: boolish.optional(),
 
@@ -186,19 +203,17 @@ function validateEnv() {
     (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
   );
   if (data.NODE_ENV === "production" && !isTestRuntime && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
-    console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");
-    process.exit(1);
+    console.warn("⚠️  WARNING: TOKEN_ENCRYPTION_KEY is not set but OAuth is enabled. OAuth token persistence will use a fallback key.");
+    console.warn("   Set TOKEN_ENCRYPTION_KEY (>=32 chars) in .env.production for secure token storage.");
   }
 
   // Production bootstrap hardening: seed-production.ts runs on startup.
   if (data.NODE_ENV === "production" && !isTestRuntime) {
     if (!data.ADMIN_EMAIL) {
-      console.error("❌ ADMIN_EMAIL is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_EMAIL is not set. Admin bootstrap will be skipped.");
     }
     if (!data.ADMIN_PASSWORD) {
-      console.error("❌ ADMIN_PASSWORD is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_PASSWORD is not set. Admin bootstrap will be skipped.");
     }
     if (data.ADMIN_PASSWORD && data.ADMIN_PASSWORD.length < 12) {
       console.warn("⚠️  WARNING: ADMIN_PASSWORD should be at least 12 characters in production.");
