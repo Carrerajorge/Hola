@@ -382,7 +382,7 @@ export function ProviderConnectionHubButton({
 
               <GeminiCliOAuthButton
                 onConnected={handleConnected}
-                autoStart={autoStartProvider === "gemini"}
+                autoStart={autoStartProvider === "gemini" || autoStartProvider === "antigravity"}
                 initialEmail={autoConnectEmail || undefined}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   geminiOpenDialogRef.current = openDialog;

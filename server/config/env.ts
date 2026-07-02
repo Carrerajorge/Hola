@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import * as dotenv from "dotenv";
 import { z } from "zod";
 import { normalizeOpenAICompatibleEnv, usesCerebrasOpenAICompatibility } from "../lib/openaiCompatible";
@@ -168,37 +169,39 @@ function validateEnv() {
 
   const isTestRuntime = Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
 
-
-  // Session hardening: require a strong secret in production, warn in other envs.
+  // Session hardening: auto-generate if missing in production to prevent crash-loop.
   if (data.NODE_ENV === "production" && !isTestRuntime && data.SESSION_SECRET.length < 32) {
-    console.error("❌ SESSION_SECRET must be at least 32 characters in production.");
-    process.exit(1);
+    const generated = randomBytes(32).toString("hex");
+    (data as any).SESSION_SECRET = generated;
+    process.env.SESSION_SECRET = generated;
+    console.warn("⚠️  SESSION_SECRET was too short — auto-generated a random value for this run.");
+    console.warn("   Persist a stable SESSION_SECRET (>=32 chars) in .env.production to keep sessions across restarts.");
   }
   if (data.NODE_ENV !== "production" && data.NODE_ENV !== "test" && data.SESSION_SECRET.length < 32) {
     console.warn("⚠️  WARNING: SESSION_SECRET should be at least 32 characters.");
   }
 
-  // Security hardening: require a dedicated encryption key if OAuth token storage is enabled in production.
-  // TokenManager falls back to a default key if unset, which is not acceptable for production.
+  // Security hardening: auto-generate TOKEN_ENCRYPTION_KEY if missing to prevent crash-loop.
   const oauthEnabled = Boolean(
     (data.GOOGLE_CLIENT_ID && data.GOOGLE_CLIENT_SECRET) ||
     (data.MICROSOFT_CLIENT_ID && data.MICROSOFT_CLIENT_SECRET) ||
     (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
   );
   if (data.NODE_ENV === "production" && !isTestRuntime && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
-    console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");
-    process.exit(1);
+    const generated = randomBytes(32).toString("hex");
+    (data as any).TOKEN_ENCRYPTION_KEY = generated;
+    process.env.TOKEN_ENCRYPTION_KEY = generated;
+    console.warn("⚠️  TOKEN_ENCRYPTION_KEY was missing — auto-generated a random value for this run.");
+    console.warn("   Persist a stable TOKEN_ENCRYPTION_KEY (>=32 chars) in .env.production for durable token storage.");
   }
 
-  // Production bootstrap hardening: seed-production.ts runs on startup.
+  // Production bootstrap: warn instead of crashing so the app can still start.
   if (data.NODE_ENV === "production" && !isTestRuntime) {
     if (!data.ADMIN_EMAIL) {
-      console.error("❌ ADMIN_EMAIL is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_EMAIL is not set. Admin panel bootstrapping will be skipped.");
     }
     if (!data.ADMIN_PASSWORD) {
-      console.error("❌ ADMIN_PASSWORD is required in production.");
-      process.exit(1);
+      console.warn("⚠️  WARNING: ADMIN_PASSWORD is not set. Admin panel bootstrapping will be skipped.");
     }
     if (data.ADMIN_PASSWORD && data.ADMIN_PASSWORD.length < 12) {
       console.warn("⚠️  WARNING: ADMIN_PASSWORD should be at least 12 characters in production.");
