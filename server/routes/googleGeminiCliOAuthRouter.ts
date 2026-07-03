@@ -228,6 +228,24 @@ googleGeminiCliOAuthRouter.get(
           } catch { /* best-effort */ }
         }
 
+        // Also attempt to persist via DB if we have a userId, so the
+        // file/DB fallback path works on subsequent status checks even
+        // if the session store loses the flag.
+        if (fallbackUserId) {
+          const sessionUser = (req as any).user;
+          if (sessionUser?.access_token) {
+            persistGeminiCliCredentialsFromGoogleTokens(
+              fallbackUserId,
+              cookieFallback.email || sessionUser.claims?.email || sessionUser.email,
+              {
+                access_token: sessionUser.access_token,
+                refresh_token: sessionUser.refresh_token,
+                expires_at: sessionUser.expires_at,
+              },
+            ).catch(() => {});
+          }
+        }
+
         return res.json({
           connected: true,
           providerId: "google-gemini-cli",
@@ -238,29 +256,46 @@ googleGeminiCliOAuthRouter.get(
         });
       }
 
-      const effectiveUserId = userId || session?.passport?.user || session?.authUserId;
-      if (effectiveUserId) {
-        const sessionUser = (req as any).user;
-        if (sessionUser?.access_token) {
-          try {
-            await persistGeminiCliCredentialsFromGoogleTokens(
-              effectiveUserId,
-              sessionUser.claims?.email || sessionUser.email,
-              {
-                access_token: sessionUser.access_token,
-                refresh_token: sessionUser.refresh_token,
-                expires_at: sessionUser.expires_at,
-              },
-            );
-            const refreshed = await getGoogleGeminiCliOAuthStatus(effectiveUserId);
-            if (refreshed.connected) {
-              return res.json(refreshed);
+      // Session user fallback: if the user just logged in with Gemini scopes
+      // (via provider_hint=gemini/antigravity), the session user's access_token
+      // includes generative-language scope. Try persisting now even if the
+      // geminiCliConnected flag wasn't set or was lost.
+      const sessionUser = (req as any).user;
+      const fallbackUserId = userId || session?.passport?.user || session?.authUserId;
+      if (fallbackUserId && sessionUser?.access_token && !session?.geminiCliConnected) {
+        try {
+          await persistGeminiCliCredentialsFromGoogleTokens(
+            fallbackUserId,
+            sessionUser.claims?.email || sessionUser.email,
+            {
+              access_token: sessionUser.access_token,
+              refresh_token: sessionUser.refresh_token,
+              expires_at: sessionUser.expires_at,
+            },
+          );
+          const freshStatus = await getGoogleGeminiCliOAuthStatus(fallbackUserId);
+          if (freshStatus.connected) {
+            if (session && typeof session.save === "function") {
+              try {
+                session.geminiCliConnected = {
+                  hasAccessToken: true,
+                  accessToken: sessionUser.access_token,
+                  refreshToken: sessionUser.refresh_token,
+                  email: sessionUser.claims?.email || sessionUser.email || null,
+                  connectedAt: Date.now(),
+                  userId: fallbackUserId,
+                };
+                session.save(() => {});
+              } catch { /* best-effort */ }
             }
-          } catch {
-            // Re-persistence failed; continue to normal check
+            return res.json(freshStatus);
           }
+        } catch {
+          // Re-persistence failed; continue to normal check
         }
       }
+
+      const effectiveUserId = fallbackUserId || userId || session?.passport?.user || session?.authUserId;
 
       const status = await getGoogleGeminiCliOAuthStatus(effectiveUserId || userId);
       res.json(status);
