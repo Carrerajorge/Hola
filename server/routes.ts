@@ -833,6 +833,42 @@ export async function registerRoutes(
                     expiresAt: directTokens?.expires_at || null,
                   };
                 }
+                // Set a short-lived cookie as a fallback signal for the
+                // Gemini CLI status endpoint. The session store may lag behind
+                // the redirect, but a cookie is available on the very next
+                // request from the same browser.
+                const cookieName = `iliagpt_provider_connected_${providerHint}`;
+                const cookieValue = encodeURIComponent(JSON.stringify({
+                  provider: providerHint,
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie(cookieName, cookieValue, {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
+              }
+
+              // For OpenAI provider hint, set a cookie so the OpenAI codex
+              // status endpoint can detect the user just came from login.
+              if (providerHint === "openai") {
+                const cookieValue = encodeURIComponent(JSON.stringify({
+                  provider: "openai",
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie("iliagpt_provider_connected_openai", cookieValue, {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
               }
 
               const doRedirect = () => res.redirect(redirectTarget);
