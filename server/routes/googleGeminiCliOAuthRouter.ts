@@ -164,15 +164,19 @@ googleGeminiCliOAuthRouter.get(
           const normalizedExpiresAt = sessionGemini.expiresAt
             ? (sessionGemini.expiresAt > 1e12 ? sessionGemini.expiresAt : sessionGemini.expiresAt * 1000)
             : undefined;
-          persistGeminiCliCredentialsFromGoogleTokens(
-            fastPathUserId,
-            sessionGemini.email,
-            {
-              access_token: sessionGemini.accessToken,
-              refresh_token: sessionGemini.refreshToken,
-              expires_at: normalizedExpiresAt,
-            },
-          ).catch(() => {});
+          // Only re-persist real OAuth tokens, never placeholder values
+          const isRealToken = sessionGemini.accessToken.length > 30;
+          if (isRealToken) {
+            persistGeminiCliCredentialsFromGoogleTokens(
+              fastPathUserId,
+              sessionGemini.email,
+              {
+                access_token: sessionGemini.accessToken,
+                refresh_token: sessionGemini.refreshToken,
+                expires_at: normalizedExpiresAt,
+              },
+            ).catch(() => {});
+          }
         }
         return res.json({
           connected: true,
@@ -215,11 +219,16 @@ googleGeminiCliOAuthRouter.get(
 
         // Re-persist to session so subsequent checks hit the fast path
         // instead of relying on the cookie again.
+        // NOTE: Do NOT store a fake access token — the real tokens were
+        // already persisted by the Google Auth callback via
+        // persistGeminiCliCredentialsFromGoogleTokens and providersService.
+        // Setting hasAccessToken=true without a real token signals to the
+        // fast path that credentials exist on disk/DB, without trying to
+        // re-persist a bogus value.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
               hasAccessToken: true,
-              accessToken: "from-cookie-fallback",
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,
