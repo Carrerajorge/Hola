@@ -132,12 +132,12 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", "Error de autenticacion con OpenAI. Intenta de nuevo."));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow) {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Sesion OAuth expirada o invalida. Intenta de nuevo."));
     }
 
     const openAIWebOAuth = getOpenAIWebOAuthAvailability();
@@ -212,7 +212,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     res.send(renderCallbackPage("success", "OpenAI conectado exitosamente"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", "No se pudo completar la conexion con OpenAI. Intenta de nuevo."));
   }
 });
 
@@ -329,12 +329,12 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", "Error de autenticacion con Gemini. Intenta de nuevo."));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow || flow.provider !== "gemini") {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Sesion OAuth expirada o invalida. Intenta de nuevo."));
     }
 
     pkceFlowStore.delete(state as string);
@@ -396,7 +396,7 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message || "Error al conectar Gemini"));
+    res.status(500).send(renderCallbackPage("error", "No se pudo completar la conexion con Gemini. Intenta de nuevo."));
   }
 });
 
