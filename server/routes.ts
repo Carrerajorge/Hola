@@ -756,6 +756,21 @@ export async function registerRoutes(
                 redirectTarget = `/?auth=success&provider=gemini${emailParam}`;
               } else if (providerHint === "openai") {
                 redirectTarget = `/?auth=success&provider=openai${emailParam}`;
+                // Set a short-lived cookie so the OpenAI Codex status endpoint
+                // can report "connected" even before session propagation completes.
+                const openaiCookiePayload = JSON.stringify({
+                  provider: "openai",
+                  email: userEmail || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                });
+                res.cookie("iliagpt_provider_connected_openai", encodeURIComponent(openaiCookiePayload), {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
               } else if (providerHint === "antigravity") {
                 redirectTarget = `/?auth=success&provider=antigravity${emailParam}`;
               }
@@ -833,6 +848,26 @@ export async function registerRoutes(
                     expiresAt: directTokens?.expires_at || null,
                   };
                 }
+
+                // Set a short-lived cookie as a reliable fallback for the
+                // Gemini CLI status endpoint. The session store may not have
+                // propagated by the time the client calls /status after redirect.
+                const cookieName = providerHint === "antigravity"
+                  ? "iliagpt_provider_connected_antigravity"
+                  : "iliagpt_provider_connected_gemini";
+                const cookiePayload = JSON.stringify({
+                  provider: providerHint,
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                });
+                res.cookie(cookieName, encodeURIComponent(cookiePayload), {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
               }
 
               const doRedirect = () => res.redirect(redirectTarget);
