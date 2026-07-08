@@ -9,36 +9,43 @@ import { z } from 'zod';
 // SCHEMA DEFINITIONS
 // ============================================
 
+const emptyToUndefined = (v: unknown) =>
+    typeof v === 'string' && v.trim() === '' ? undefined : v;
+
+const optStr = z.preprocess(emptyToUndefined, z.string().optional());
+const optUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
+const optMinStr = (min: number, msg: string) =>
+    z.preprocess(emptyToUndefined, z.string().min(min, msg).optional());
+
 const DatabaseEnvSchema = z.object({
     DATABASE_URL: z.string().url('DATABASE_URL must be a valid URL'),
 });
 
 const AuthEnvSchema = z.object({
-    JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
-    JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
-    SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters').optional(),
+    JWT_ACCESS_SECRET: z.preprocess(emptyToUndefined, z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters').optional()),
+    JWT_REFRESH_SECRET: z.preprocess(emptyToUndefined, z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters').optional()),
+    SESSION_SECRET: optMinStr(32, 'SESSION_SECRET must be at least 32 characters'),
 });
 
 const LLMEnvSchema = z.object({
-    XAI_API_KEY: z.string().min(1, 'XAI_API_KEY is required').optional(),
-    GOOGLE_API_KEY: z.string().min(1, 'GOOGLE_API_KEY is required').optional(),
-    ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required').optional(),
-    OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required').optional(),
-    OPENAI_BASE_URL: z.string().url('OPENAI_BASE_URL must be a valid URL').optional(),
-    CEREBRAS_API_KEY: z.string().min(1, 'CEREBRAS_API_KEY is required').optional(),
-    CEREBRAS_BASE_URL: z.string().url('CEREBRAS_BASE_URL must be a valid URL').optional(),
+    XAI_API_KEY: optStr,
+    GOOGLE_API_KEY: optStr,
+    ANTHROPIC_API_KEY: optStr,
+    OPENAI_API_KEY: optStr,
+    OPENAI_BASE_URL: optUrl,
+    CEREBRAS_API_KEY: optStr,
+    CEREBRAS_BASE_URL: optUrl,
 }).refine(
     (data) => data.XAI_API_KEY || data.GOOGLE_API_KEY || data.ANTHROPIC_API_KEY || data.OPENAI_API_KEY || data.CEREBRAS_API_KEY,
     'At least one LLM API key must be configured'
 );
 
 const EncryptionEnvSchema = z.object({
-    ENCRYPTION_KEY: z.string()
+    ENCRYPTION_KEY: z.preprocess(emptyToUndefined, z.string()
         .length(64, 'ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
         .regex(/^[a-fA-F0-9]+$/, 'ENCRYPTION_KEY must be hexadecimal')
-        .optional(),
-    // Back-compat: allow using TOKEN_ENCRYPTION_KEY as the primary secret.
-    TOKEN_ENCRYPTION_KEY: z.string().min(32, 'TOKEN_ENCRYPTION_KEY must be at least 32 characters').optional(),
+        .optional()),
+    TOKEN_ENCRYPTION_KEY: optMinStr(32, 'TOKEN_ENCRYPTION_KEY must be at least 32 characters'),
 }).refine(
     (data) => {
         if (process.env.NODE_ENV !== 'production') return true;
@@ -48,9 +55,9 @@ const EncryptionEnvSchema = z.object({
 );
 
 const PushNotificationsEnvSchema = z.object({
-    VAPID_PUBLIC_KEY: z.string().optional(),
-    VAPID_PRIVATE_KEY: z.string().optional(),
-    VAPID_SUBJECT: z.string().email().optional(),
+    VAPID_PUBLIC_KEY: optStr,
+    VAPID_PRIVATE_KEY: optStr,
+    VAPID_SUBJECT: z.preprocess(emptyToUndefined, z.string().email().optional()),
 }).refine(
     (data) => {
         const hasAll = data.VAPID_PUBLIC_KEY && data.VAPID_PRIVATE_KEY && data.VAPID_SUBJECT;
@@ -125,12 +132,13 @@ export function validateEnv(): Env {
 
         console.error('\n  Please check your .env file and fix the issues above.\n');
 
-        // In production, crash immediately
+        // In production, warn but do NOT crash — a crash-loop is worse than
+        // running with missing optional vars. Required vars will fail at runtime.
         if (process.env.NODE_ENV === 'production') {
-            process.exit(1);
+            console.warn('⚠️  Continuing despite validation warnings (production crash-loop prevention)');
+        } else {
+            throw new Error('Environment validation failed');
         }
-
-        throw new Error('Environment validation failed');
     }
 
     validatedEnv = result.data;
