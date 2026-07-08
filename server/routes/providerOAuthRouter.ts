@@ -132,7 +132,8 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters", "openai"));
+      const safeError = escapeHtml(String(oauthError || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", safeError, "openai"));
     }
 
     const flow = pkceFlowStore.get(state as string);
@@ -213,7 +214,8 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     res.send(renderCallbackPage("success", "OpenAI conectado exitosamente", "openai"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message, "openai"));
+    const safeError = escapeHtml(String(error.message || "Error desconocido"));
+    res.status(500).send(renderCallbackPage("error", safeError, "openai"));
   }
 });
 
@@ -320,7 +322,8 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters", "gemini"));
+      const safeError = escapeHtml(String(oauthError || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", safeError, "gemini"));
     }
 
     const flow = pkceFlowStore.get(state as string);
@@ -385,7 +388,8 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente", "gemini"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message, "gemini"));
+    const safeError = escapeHtml(String(error.message || "Error desconocido"));
+    res.status(500).send(renderCallbackPage("error", safeError, "gemini"));
   }
 });
 
@@ -635,8 +639,8 @@ function renderCallbackPage(status: "success" | "error", message: string, provid
       window.opener && window.opener.postMessage({
         type: "provider-oauth-result",
         status: "${status}",
-        provider: ${JSON.stringify(provider || "")},
-        message: ${JSON.stringify(message)}
+        provider: ${JSON.stringify(provider || "").replace(/</g, "\\u003c")},
+        message: ${JSON.stringify(safeMessage).replace(/</g, "\\u003c")}
       }, window.location.origin);
       setTimeout(() => window.close(), 2000);
     } catch(e) {}
