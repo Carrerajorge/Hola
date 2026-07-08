@@ -835,12 +835,31 @@ export async function registerRoutes(
                 }
               }
 
+              // Set a short-lived cookie as fallback for the status endpoint.
+              // The session store may lag behind the redirect, but a cookie is
+              // available on the very next request from the same browser.
+              if (providerHint === "gemini" || providerHint === "antigravity" || providerHint === "openai") {
+                const cookieName = `iliagpt_provider_connected_${providerHint}`;
+                const cookieValue = encodeURIComponent(JSON.stringify({
+                  provider: providerHint,
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie(cookieName, cookieValue, {
+                  httpOnly: false,
+                  secure: process.env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
+              }
+
               const doRedirect = () => res.redirect(redirectTarget);
               if (sess?.save) {
                 sess.save((saveErr: any) => {
                   if (saveErr) {
                     console.warn("[Auth] Google session save failed, retrying once:", saveErr);
-                    // Retry once after a short delay
                     setTimeout(() => {
                       sess.save((retryErr: any) => {
                         if (retryErr) {

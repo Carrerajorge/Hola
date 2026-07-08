@@ -132,12 +132,12 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters", "openai"));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow) {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state", "openai"));
     }
 
     const openAIWebOAuth = getOpenAIWebOAuthAvailability();
@@ -150,6 +150,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
             "error",
             openAIWebOAuth.reason ||
               "OpenAI OAuth directo no está disponible en este despliegue.",
+            "openai",
           ),
         );
     }
@@ -174,7 +175,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorBody = await tokenResponse.text();
       console.error("[ProviderOAuth] OpenAI token exchange failed:", errorBody);
-      return res.status(400).send(renderCallbackPage("error", "Token exchange failed"));
+      return res.status(400).send(renderCallbackPage("error", "Token exchange failed", "openai"));
     }
 
     const tokens = (await tokenResponse.json()) as {
@@ -209,10 +210,10 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
       );
     }
 
-    res.send(renderCallbackPage("success", "OpenAI conectado exitosamente"));
+    res.send(renderCallbackPage("success", "OpenAI conectado exitosamente", "openai"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", error.message, "openai"));
   }
 });
 
@@ -319,12 +320,12 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters", "gemini"));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow || flow.provider !== "gemini") {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state", "gemini"));
     }
 
     pkceFlowStore.delete(state as string);
@@ -347,7 +348,7 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorBody = await tokenResponse.text();
       console.error("[ProviderOAuth] Gemini token exchange failed:", errorBody);
-      return res.status(400).send(renderCallbackPage("error", "Token exchange failed"));
+      return res.status(400).send(renderCallbackPage("error", "Token exchange failed", "gemini"));
     }
 
     const tokens = (await tokenResponse.json()) as {
@@ -381,10 +382,10 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
       );
     }
 
-    res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente"));
+    res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente", "gemini"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", error.message, "gemini"));
   }
 });
 
@@ -579,36 +580,52 @@ router.get("/status", async (req: Request, res: Response) => {
 
 // ─── Callback Page Renderer ──────────────────────────────────────────────────
 
-function renderCallbackPage(status: "success" | "error", message: string): string {
+const PROVIDER_LOGOS: Record<string, string> = {
+  openai: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Zm-8.06 13.8a4.5 4.5 0 0 1-2.88-1.04l.14-.08 4.78-2.76a.78.78 0 0 0 .39-.67v-6.74l2.02 1.17a.07.07 0 0 1 .04.06v5.58a4.52 4.52 0 0 1-4.49 4.48Zm-9.67-4.12a4.48 4.48 0 0 1-.54-3.03l.14.08 4.78 2.76a.77.77 0 0 0 .78 0l5.83-3.37v2.33a.07.07 0 0 1-.03.06l-4.83 2.79a4.52 4.52 0 0 1-6.13-1.62ZM3.24 7.83a4.49 4.49 0 0 1 2.34-1.97V11.6a.77.77 0 0 0 .39.68l5.83 3.37-2.02 1.16a.07.07 0 0 1-.07 0L4.88 14a4.52 4.52 0 0 1-1.64-6.17Zm16.6 3.87-5.84-3.37L16.02 7.17a.07.07 0 0 1 .07 0l4.83 2.79a4.51 4.51 0 0 1-.7 8.14V12.37a.78.78 0 0 0-.38-.67Zm2.01-3.04-.14-.08-4.78-2.76a.77.77 0 0 0-.78 0l-5.83 3.37V6.86a.07.07 0 0 1 .03-.06l4.83-2.79a4.52 4.52 0 0 1 6.67 4.65ZM8.02 13.15 6 11.98a.07.07 0 0 1-.04-.06V6.34a4.52 4.52 0 0 1 7.37-3.48l-.14.08-4.78 2.76a.78.78 0 0 0-.39.68v6.77Zm1.1-2.37 2.6-1.5 2.6 1.5v3l-2.6 1.5-2.6-1.5v-3Z" fill="#10a37f"/></svg>`,
+  gemini: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><defs><linearGradient id="g" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".45" stop-color="#8E6CF8"/><stop offset="1" stop-color="#34A853"/></linearGradient></defs><path fill="url(#g)" d="M12 2.5c.46 3.63 1.24 5.96 2.42 7.08 1.11 1.05 3.45 1.84 7.08 2.42-3.63.58-5.97 1.37-7.08 2.42-1.18 1.12-1.96 3.45-2.42 7.08-.46-3.63-1.24-5.96-2.42-7.08-1.11-1.05-3.45-1.84-7.08-2.42 3.63-.58 5.97-1.37 7.08-2.42C10.76 8.46 11.54 6.13 12 2.5Z"/></svg>`,
+  google: `<svg width="48" height="48" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09A6.57 6.57 0 0 1 5.49 12c0-.72.13-1.43.35-2.09V7.07H2.18A11 11 0 0 0 1 12c0 1.78.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>`,
+  antigravity: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M12 3.25c-4.83 0-8.75 3.92-8.75 8.75S7.17 20.75 12 20.75c2.85 0 5.38-1.37 6.98-3.48" stroke="#4285F4" stroke-width="1.8" stroke-linecap="round"/><path d="M14.25 7.25c3.04 0 5.5 2.46 5.5 5.5 0 1.96-1.02 3.67-2.56 4.65" stroke="#34A853" stroke-width="1.8" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="12" r="2.4" fill="#EA4335" opacity=".92"/><path d="M16.8 6.2l.95 2.05 2.05.95-2.05.95-.95 2.05-.95-2.05-2.05-.95 2.05-.95.95-2.05Z" fill="#FBBC05"/></svg>`,
+  anthropic: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M13.83 3H16.7l5.3 18h-2.87l-1.27-4.53H12.3L11 20.78h-2.87L13.83 3Zm-.55 10.96h3.8l-1.9-6.72-1.9 6.72ZM7.17 3h2.87L4.74 21H1.87L7.17 3Z" fill="#D97706"/></svg>`,
+};
+
+function renderCallbackPage(status: "success" | "error", message: string, provider?: string): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const isSuccess = status === "success";
+  const logo = PROVIDER_LOGOS[provider || ""] || "";
+  const providerName = provider === "openai" ? "OpenAI" : provider === "gemini" ? "Gemini" : provider === "antigravity" ? "Antigravity" : provider === "anthropic" ? "Anthropic" : "";
+  const title = providerName ? `${providerName} OAuth` : "OAuth";
 
   return `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OAuth ${isSuccess ? "Completado" : "Error"}</title>
+  <title>${title} ${isSuccess ? "Completado" : "Error"} | ILIAGPT</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #07131f; color: #f8fafc; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
-    .card { max-width: 440px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 32px; text-align: center; }
+    .card { max-width: 440px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 32px; text-align: center; box-shadow: 0 24px 80px rgba(0,0,0,.35); }
+    .logo { margin-bottom: 16px; display: flex; justify-content: center; }
     h1 { font-size: 22px; margin: 0 0 12px; color: ${isSuccess ? "#22c55e" : "#ef4444"}; }
-    p { color: #94a3b8; margin: 8px 0; }
-    .icon { font-size: 48px; margin-bottom: 16px; }
+    p { color: #94a3b8; margin: 8px 0; line-height: 1.5; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; border: 1px solid rgba(148,163,184,.2); background: rgba(15,23,42,.6); font-size: 13px; color: #cbd5e1; margin-bottom: 16px; }
+    .status-icon { font-size: 36px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon">${isSuccess ? "✅" : "❌"}</div>
+    ${logo ? `<div class="logo">${logo}</div>` : ""}
+    ${providerName ? `<div class="badge">${providerName}</div>` : ""}
+    <div class="status-icon">${isSuccess ? "✅" : "❌"}</div>
     <h1>${isSuccess ? "Conexión exitosa" : "Error de conexión"}</h1>
     <p>${message}</p>
-    <p style="margin-top: 20px; font-size: 14px;">Puedes cerrar esta ventana.</p>
+    <p style="margin-top: 20px; font-size: 14px; color: #64748b;">Esta ventana se cerrará automáticamente.</p>
   </div>
   <script nonce="${nonce}">
     try {
       window.opener && window.opener.postMessage({
         type: "provider-oauth-result",
         status: "${status}",
+        provider: ${JSON.stringify(provider || "")},
         message: ${JSON.stringify(message)}
       }, window.location.origin);
       setTimeout(() => window.close(), 2000);
