@@ -588,9 +588,19 @@ const PROVIDER_LOGOS: Record<string, string> = {
   anthropic: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M13.83 3H16.7l5.3 18h-2.87l-1.27-4.53H12.3L11 20.78h-2.87L13.83 3Zm-.55 10.96h3.8l-1.9-6.72-1.9 6.72ZM7.17 3h2.87L4.74 21H1.87L7.17 3Z" fill="#D97706"/></svg>`,
 };
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderCallbackPage(status: "success" | "error", message: string, provider?: string): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const isSuccess = status === "success";
+  const safeMessage = escapeHtml(message);
   const logo = PROVIDER_LOGOS[provider || ""] || "";
   const providerName = provider === "openai" ? "OpenAI" : provider === "gemini" ? "Gemini" : provider === "antigravity" ? "Antigravity" : provider === "anthropic" ? "Anthropic" : "";
   const title = providerName ? `${providerName} OAuth` : "OAuth";
@@ -617,7 +627,7 @@ function renderCallbackPage(status: "success" | "error", message: string, provid
     ${providerName ? `<div class="badge">${providerName}</div>` : ""}
     <div class="status-icon">${isSuccess ? "✅" : "❌"}</div>
     <h1>${isSuccess ? "Conexión exitosa" : "Error de conexión"}</h1>
-    <p>${message}</p>
+    <p>${safeMessage}</p>
     <p style="margin-top: 20px; font-size: 14px; color: #64748b;">Esta ventana se cerrará automáticamente.</p>
   </div>
   <script nonce="${nonce}">
