@@ -835,25 +835,53 @@ export async function registerRoutes(
                 }
               }
 
+              // Set provider-connected cookies so the status endpoints can
+              // detect the connection immediately after redirect, even if the
+              // session store hasn't propagated yet.
+              const cookieOpts = { path: "/", httpOnly: false, maxAge: 30 * 60 * 1000, sameSite: "lax" as const, secure: env.NODE_ENV === "production" };
+              if (providerHint === "gemini" || providerHint === "antigravity") {
+                const cookiePayload = encodeURIComponent(JSON.stringify({
+                  provider: providerHint,
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie(`iliagpt_provider_connected_${providerHint}`, cookiePayload, cookieOpts);
+              }
+              if (providerHint === "openai") {
+                const cookiePayload = encodeURIComponent(JSON.stringify({
+                  provider: "openai",
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie("iliagpt_provider_connected_openai", cookiePayload, cookieOpts);
+              }
+
               const doRedirect = () => res.redirect(redirectTarget);
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) {
-                    console.warn("[Auth] Google session save failed, retrying once:", saveErr);
-                    // Retry once after a short delay
-                    setTimeout(() => {
-                      sess.save((retryErr: any) => {
-                        if (retryErr) {
-                          console.error("[Auth] Google session save retry failed:", retryErr);
-                        }
-                        doRedirect();
-                      });
-                    }, 200);
+
+              // Promise-based session save with retry (up to 3 attempts,
+              // exponential backoff: 150ms, 300ms, 450ms).
+              const saveSessionWithRetry = async (session: any, maxAttempts = 3): Promise<void> => {
+                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                  try {
+                    await new Promise<void>((resolve, reject) => {
+                      session.save((err: any) => (err ? reject(err) : resolve()));
+                    });
                     return;
+                  } catch (err) {
+                    if (attempt === maxAttempts) {
+                      console.error("[Auth] Google session save failed after", maxAttempts, "attempts:", err);
+                      return;
+                    }
+                    console.warn(`[Auth] Google session save attempt ${attempt} failed, retrying...`);
+                    await new Promise((r) => setTimeout(r, attempt * 150));
                   }
-                  doRedirect();
-                });
-                return;
+                }
+              };
+
+              if (sess?.save) {
+                await saveSessionWithRetry(sess);
               }
 
               doRedirect();

@@ -209,7 +209,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
       );
     }
 
-    res.send(renderCallbackPage("success", "OpenAI conectado exitosamente"));
+    res.send(renderCallbackPage("success", "OpenAI conectado exitosamente", "openai"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
     res.status(500).send(renderCallbackPage("error", error.message));
@@ -381,7 +381,7 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
       );
     }
 
-    res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente"));
+    res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente", "gemini"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);
     res.status(500).send(renderCallbackPage("error", error.message));
@@ -579,30 +579,57 @@ router.get("/status", async (req: Request, res: Response) => {
 
 // ─── Callback Page Renderer ──────────────────────────────────────────────────
 
-function renderCallbackPage(status: "success" | "error", message: string): string {
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderCallbackPage(status: "success" | "error", message: string, provider?: string): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const isSuccess = status === "success";
+  const safeMessage = escapeHtml(message);
+  const csp = [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data:",
+    "style-src 'unsafe-inline'",
+    `script-src 'nonce-${nonce}'`,
+    "connect-src 'self'",
+  ].join("; ");
 
-  return `<!doctype html>
+  const providerLogos: Record<string, string> = {
+    openai: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Z" fill="#10a37f"/></svg>`,
+    gemini: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><defs><linearGradient id="g" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".45" stop-color="#8E6CF8"/><stop offset="1" stop-color="#34A853"/></linearGradient></defs><path fill="url(#g)" d="M12 2.5c.46 3.63 1.24 5.96 2.42 7.08 1.11 1.05 3.45 1.84 7.08 2.42-3.63.58-5.97 1.37-7.08 2.42-1.18 1.12-1.96 3.45-2.42 7.08-.46-3.63-1.24-5.96-2.42-7.08-1.11-1.05-3.45-1.84-7.08-2.42 3.63-.58 5.97-1.37 7.08-2.42C10.76 8.46 11.54 6.13 12 2.5Z"/></svg>`,
+    antigravity: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M12 3.25c-4.83 0-8.75 3.92-8.75 8.75S7.17 20.75 12 20.75c2.85 0 5.38-1.37 6.98-3.48" stroke="#4285F4" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="2.4" fill="#EA4335" opacity=".92"/><path d="M16.8 6.2l.95 2.05 2.05.95-2.05.95-.95 2.05-.95-2.05-2.05-.95 2.05-.95.95-2.05Z" fill="#FBBC05"/></svg>`,
+    anthropic: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M13.83 3H16.7l5.3 18h-2.87l-1.28-4.61h-5.94L10.63 21H7.76l6.07-18zm-.31 10.82h4.22L15.62 7.2l-2.1 6.62z" fill="#d97706"/></svg>`,
+    google: `<svg width="48" height="48" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>`,
+  };
+  const logo = (provider && providerLogos[provider]) || (isSuccess ? "" : "");
+  const fallbackIcon = logo ? "" : `<div style="font-size:48px;margin-bottom:16px">${isSuccess ? "✅" : "❌"}</div>`;
+
+  const html = `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OAuth ${isSuccess ? "Completado" : "Error"}</title>
+  <title>ILIAGPT - OAuth ${isSuccess ? "Completado" : "Error"}</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #07131f; color: #f8fafc; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
-    .card { max-width: 440px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 32px; text-align: center; }
+    .card { max-width: 440px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 32px; text-align: center; box-shadow: 0 24px 80px rgba(15,23,42,.35); }
+    .logo { margin-bottom: 16px; }
+    .brand { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #64748b; margin-bottom: 16px; }
     h1 { font-size: 22px; margin: 0 0 12px; color: ${isSuccess ? "#22c55e" : "#ef4444"}; }
-    p { color: #94a3b8; margin: 8px 0; }
-    .icon { font-size: 48px; margin-bottom: 16px; }
+    p { color: #94a3b8; margin: 8px 0; line-height: 1.55; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon">${isSuccess ? "✅" : "❌"}</div>
-    <h1>${isSuccess ? "Conexión exitosa" : "Error de conexión"}</h1>
-    <p>${message}</p>
-    <p style="margin-top: 20px; font-size: 14px;">Puedes cerrar esta ventana.</p>
+    <div class="brand">ILIAGPT</div>
+    ${logo ? `<div class="logo">${logo}</div>` : fallbackIcon}
+    <h1>${isSuccess ? "Conexion exitosa" : "Error de conexion"}</h1>
+    <p>${safeMessage}</p>
+    <p style="margin-top:20px;font-size:14px;">Puedes cerrar esta ventana.</p>
   </div>
   <script nonce="${nonce}">
     try {
@@ -611,11 +638,13 @@ function renderCallbackPage(status: "success" | "error", message: string): strin
         status: "${status}",
         message: ${JSON.stringify(message)}
       }, window.location.origin);
-      setTimeout(() => window.close(), 2000);
+      setTimeout(function() { try { window.close(); } catch(e) {} }, 1500);
     } catch(e) {}
   </script>
 </body>
 </html>`;
+
+  return html;
 }
 
 export default router;
