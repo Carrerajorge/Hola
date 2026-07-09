@@ -29,42 +29,61 @@ const boolish = z
   }, z.enum(["true", "false"]).default("false"))
   .transform((v) => v === "true");
 
+const emptyToUndefined = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().optional(),
+);
+
+const emptyToUndefinedEmail = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().email().optional(),
+);
+
+const emptyToUndefinedMinLen = (min: number, msg: string) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(min, msg).optional(),
+  );
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().transform(Number).default("5000"),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-  DATABASE_READ_URL: z.string().optional(),
+  DATABASE_READ_URL: emptyToUndefined,
 
   // LLM keys
-  GEMINI_API_KEY: z.string().optional(),
-  GOOGLE_API_KEY: z.string().optional(), // backward/alternate name used in parts of the codebase
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_BASE_URL: z.string().optional(),
-  OPENROUTER_API_KEY: z.string().optional(),
-  CEREBRAS_API_KEY: z.string().optional(),
-  CEREBRAS_BASE_URL: z.string().optional(),
-  XAI_API_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  DEEPSEEK_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: emptyToUndefined,
+  GOOGLE_API_KEY: emptyToUndefined,
+  OPENAI_API_KEY: emptyToUndefined,
+  OPENAI_BASE_URL: emptyToUndefined,
+  OPENROUTER_API_KEY: emptyToUndefined,
+  CEREBRAS_API_KEY: emptyToUndefined,
+  CEREBRAS_BASE_URL: emptyToUndefined,
+  XAI_API_KEY: emptyToUndefined,
+  ANTHROPIC_API_KEY: emptyToUndefined,
+  DEEPSEEK_API_KEY: emptyToUndefined,
 
   // Optional model/baseURL overrides
-  OPENAI_MODEL: z.string().optional(),
-  CEREBRAS_MODEL: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().optional(),
-  DEEPSEEK_MODEL: z.string().optional(),
-  DEEPSEEK_BASE_URL: z.string().optional(),
+  OPENAI_MODEL: emptyToUndefined,
+  CEREBRAS_MODEL: emptyToUndefined,
+  ANTHROPIC_MODEL: emptyToUndefined,
+  DEEPSEEK_MODEL: emptyToUndefined,
+  DEEPSEEK_BASE_URL: emptyToUndefined,
 
-  SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
+  SESSION_SECRET: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(1, "SESSION_SECRET is required").default(() => randomBytes(32).toString("hex")),
+  ),
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
   // Token encryption (required for storing OAuth tokens securely in production)
-  TOKEN_ENCRYPTION_KEY: z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+  TOKEN_ENCRYPTION_KEY: emptyToUndefinedMinLen(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters"),
 
   // Admin / bootstrap (used by admin panel and production seeding)
-  ADMIN_EMAIL: z.string().email().optional(),
-  ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters").optional(),
+  ADMIN_EMAIL: emptyToUndefinedEmail,
+  ADMIN_PASSWORD: emptyToUndefinedMinLen(8, "ADMIN_PASSWORD must be at least 8 characters"),
   ADMIN_REQUIRE_2FA: boolish.optional(),
   SEED_ON_START: boolish.optional(),
 
@@ -72,74 +91,81 @@ const envSchema = z.object({
   ALLOW_CATALOG_SEEDING: boolish.optional(),
   ALLOW_STRIPE_PRODUCT_SEEDING: boolish.optional(),
 
-  MICROSOFT_CLIENT_ID: z.string().optional(),
-  MICROSOFT_CLIENT_SECRET: z.string().optional(),
-  MICROSOFT_TENANT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_ID: emptyToUndefined,
+  MICROSOFT_CLIENT_SECRET: emptyToUndefined,
+  MICROSOFT_TENANT_ID: emptyToUndefined,
 
-  GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CLIENT_ID: emptyToUndefined,
+  GOOGLE_CLIENT_SECRET: emptyToUndefined,
 
-  AUTH0_DOMAIN: z.string().optional(),
-  AUTH0_CLIENT_ID: z.string().optional(),
-  AUTH0_CLIENT_SECRET: z.string().optional(),
+  AUTH0_DOMAIN: emptyToUndefined,
+  AUTH0_CLIENT_ID: emptyToUndefined,
+  AUTH0_CLIENT_SECRET: emptyToUndefined,
 
   DB_POOL_MAX: z.string().transform(Number).default("20"),
   DB_POOL_MIN: z.string().transform(Number).default("2"),
 
   // Channels (Telegram / WhatsApp Cloud)
-  TELEGRAM_BOT_TOKEN: z.string().optional(),
-  TELEGRAM_WEBHOOK_SECRET_TOKEN: z.string().optional(),
-  TELEGRAM_WEBHOOK_URL: z.string().optional(),
+  TELEGRAM_BOT_TOKEN: emptyToUndefined,
+  TELEGRAM_WEBHOOK_SECRET_TOKEN: emptyToUndefined,
+  TELEGRAM_WEBHOOK_URL: emptyToUndefined,
   TELEGRAM_AUTO_SET_WEBHOOK: boolish.optional(),
 
-  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
-  WHATSAPP_APP_SECRET: z.string().optional(),
-  WHATSAPP_CLOUD_ACCESS_TOKEN: z.string().optional(),
-  WHATSAPP_CLOUD_DEFAULT_USER_ID: z.string().optional(),
+  WHATSAPP_VERIFY_TOKEN: emptyToUndefined,
+  WHATSAPP_APP_SECRET: emptyToUndefined,
+  WHATSAPP_CLOUD_ACCESS_TOKEN: emptyToUndefined,
+  WHATSAPP_CLOUD_DEFAULT_USER_ID: emptyToUndefined,
 
   // Messenger (Meta)
-  MESSENGER_PAGE_ACCESS_TOKEN: z.string().optional(),
-  MESSENGER_APP_SECRET: z.string().optional(),
-  MESSENGER_VERIFY_TOKEN: z.string().optional(),
-  MESSENGER_DEFAULT_USER_ID: z.string().optional(),
+  MESSENGER_PAGE_ACCESS_TOKEN: emptyToUndefined,
+  MESSENGER_APP_SECRET: emptyToUndefined,
+  MESSENGER_VERIFY_TOKEN: emptyToUndefined,
+  MESSENGER_DEFAULT_USER_ID: emptyToUndefined,
 
   // WeChat Official Account
-  WECHAT_APP_ID: z.string().optional(),
-  WECHAT_APP_SECRET: z.string().optional(),
-  WECHAT_TOKEN: z.string().optional(),
-  WECHAT_DEFAULT_USER_ID: z.string().optional(),
+  WECHAT_APP_ID: emptyToUndefined,
+  WECHAT_APP_SECRET: emptyToUndefined,
+  WECHAT_TOKEN: emptyToUndefined,
+  WECHAT_DEFAULT_USER_ID: emptyToUndefined,
 
   // Channel ingest execution mode:
   // - auto: queue in production when Redis is configured, otherwise in-process
   // - queue: always enqueue to BullMQ (requires Redis + worker)
   // - inprocess: process inside web server (best for local dev)
   CHANNEL_INGEST_MODE: z.enum(["auto", "queue", "inprocess"]).default("auto"),
-  MAX_CHANNEL_INGEST_JOB_BYTES: z.string().optional(),
-  CHANNEL_INGEST_ATTEMPTS: z.string().optional(),
-  CHANNEL_INGEST_BACKOFF_MS: z.string().optional(),
-  CHANNEL_INGEST_IDEMPOTENCY_TTL_MS: z.string().optional(),
-  CHANNEL_INGEST_IDEMPOTENCY_MAX_ENTRIES: z.string().optional(),
-  CHANNEL_INGEST_QUEUE_FAILURE_THRESHOLD: z.string().optional(),
-  CHANNEL_INGEST_QUEUE_CIRCUIT_OPEN_MS: z.string().optional(),
-  CHANNEL_INGEST_QUEUE_BACKPRESSURE_LIMIT: z.string().optional(),
-  CHANNEL_INGEST_QUEUE_OPERATION_TIMEOUT_MS: z.string().optional(),
-  CHANNEL_INGEST_INPROCESS_CONCURRENCY: z.string().optional(),
-  CHANNEL_INGEST_INPROCESS_TIMEOUT_MS: z.string().optional(),
-  CHANNEL_INGEST_INPROCESS_QUEUE_MAX: z.string().optional(),
-  CHANNEL_INGEST_INPROCESS_DEDUPE_TTL_MS: z.string().optional(),
-  CHANNEL_INGEST_INPROCESS_RESERVATION_TTL_MS: z.string().optional(),
+  MAX_CHANNEL_INGEST_JOB_BYTES: emptyToUndefined,
+  CHANNEL_INGEST_ATTEMPTS: emptyToUndefined,
+  CHANNEL_INGEST_BACKOFF_MS: emptyToUndefined,
+  CHANNEL_INGEST_IDEMPOTENCY_TTL_MS: emptyToUndefined,
+  CHANNEL_INGEST_IDEMPOTENCY_MAX_ENTRIES: emptyToUndefined,
+  CHANNEL_INGEST_QUEUE_FAILURE_THRESHOLD: emptyToUndefined,
+  CHANNEL_INGEST_QUEUE_CIRCUIT_OPEN_MS: emptyToUndefined,
+  CHANNEL_INGEST_QUEUE_BACKPRESSURE_LIMIT: emptyToUndefined,
+  CHANNEL_INGEST_QUEUE_OPERATION_TIMEOUT_MS: emptyToUndefined,
+  CHANNEL_INGEST_INPROCESS_CONCURRENCY: emptyToUndefined,
+  CHANNEL_INGEST_INPROCESS_TIMEOUT_MS: emptyToUndefined,
+  CHANNEL_INGEST_INPROCESS_QUEUE_MAX: emptyToUndefined,
+  CHANNEL_INGEST_INPROCESS_DEDUPE_TTL_MS: emptyToUndefined,
+  CHANNEL_INGEST_INPROCESS_RESERVATION_TTL_MS: emptyToUndefined,
 });
 
 function validateEnv() {
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
+    const isProduction = (process.env.NODE_ENV || "").trim() === "production";
+    const isTest = Boolean(process.env.VITEST) || (process.env.NODE_ENV || "").trim() === "test";
     console.error("❌ Invalid environment variables:");
     const errors = result.error.flatten().fieldErrors;
     Object.entries(errors).forEach(([key, msgs]) => {
       console.error(`   ${key}: ${msgs?.join(", ")}`);
     });
-    process.exit(1);
+    if (isProduction && !isTest) {
+      console.warn("⚠️  Continuing despite validation errors to prevent crash-loop in production.");
+      console.warn("   Fix the environment variables above for correct behavior.");
+    } else {
+      process.exit(1);
+    }
   }
 
   // Warn about missing LLM keys

@@ -159,8 +159,11 @@ googleGeminiCliOAuthRouter.get(
         Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
       ) {
         const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
-        if (sessionGemini.accessToken && fastPathUserId) {
-          // Normalize expiresAt: values < 1e12 are seconds, convert to ms
+        // Only re-persist if the token looks real (not a placeholder).
+        const tokenLooksReal = sessionGemini.accessToken &&
+          typeof sessionGemini.accessToken === "string" &&
+          sessionGemini.accessToken.length >= 30;
+        if (tokenLooksReal && fastPathUserId) {
           const normalizedExpiresAt = sessionGemini.expiresAt
             ? (sessionGemini.expiresAt > 1e12 ? sessionGemini.expiresAt : sessionGemini.expiresAt * 1000)
             : undefined;
@@ -209,22 +212,22 @@ googleGeminiCliOAuthRouter.get(
 
       if (cookieFallback) {
         const fallbackUserId = userId || cookieFallback.userId;
-        // Clear the one-shot cookie so it doesn't persist beyond first check
         res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
-        // Re-persist to session so subsequent checks hit the fast path
-        // instead of relying on the cookie again.
+        // Signal connected status in session WITHOUT storing a fake token.
+        // The actual credentials were already persisted by the Google OAuth
+        // callback handler; this path only propagates the "connected" flag.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
-              hasAccessToken: true,
-              accessToken: "from-cookie-fallback",
+              hasAccessToken: false,
+              accessToken: null,
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,
             };
-            session.save(() => {}); // fire-and-forget
+            session.save(() => {});
           } catch { /* best-effort */ }
         }
 
