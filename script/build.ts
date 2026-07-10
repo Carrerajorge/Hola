@@ -68,6 +68,16 @@ async function writeReleaseManifest(appVersion: string) {
 
 async function buildEmbeddedOpenClawControlUi() {
   console.log("building embedded openclaw control ui...");
+
+  // Skip rebuild if the control-ui is already present (pre-built or cached from a prior run).
+  try {
+    await readFile("server/openclaw/dist/control-ui/index.html", "utf-8");
+    console.log("[build] embedded openclaw control ui already present, skipping rebuild");
+    return;
+  } catch {
+    // Not present yet — proceed with install + build.
+  }
+
   // pnpm refuses to recreate node_modules in non-interactive builds unless CI is explicit.
   const embeddedUiBuildEnv = {
     ...process.env,
