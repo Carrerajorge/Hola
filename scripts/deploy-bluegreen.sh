@@ -226,33 +226,38 @@ INITSTATE
     export ANTHROPIC_API_KEY XAI_API_KEY OPENROUTER_API_KEY
     export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
 
-    # Validate and auto-generate required environment variables
-    if [ -z "${SESSION_SECRET}" ]; then
+    # Validate and auto-generate required environment variables.
+    # Check both empty AND too-short values (VPS .env.production may have
+    # invalid placeholder values that pass the -z check but crash the app).
+    if [ -z "${SESSION_SECRET}" ] || [ "${#SESSION_SECRET}" -lt 32 ]; then
         SESSION_SECRET="$(openssl rand -hex 32)"
         export SESSION_SECRET
-        warn "SESSION_SECRET was missing — auto-generated a random value."
+        warn "SESSION_SECRET was missing/too short — auto-generated a random value."
         warn "Persist it in .env.production to keep sessions stable across deploys."
+        sed -i '/^SESSION_SECRET=/d' .env.production 2>/dev/null || true
         echo "SESSION_SECRET=${SESSION_SECRET}" >> .env.production
     fi
-    if [ -z "${TOKEN_ENCRYPTION_KEY}" ]; then
+    if [ -z "${TOKEN_ENCRYPTION_KEY}" ] || [ "${#TOKEN_ENCRYPTION_KEY}" -lt 32 ]; then
         TOKEN_ENCRYPTION_KEY="$(openssl rand -hex 32)"
         export TOKEN_ENCRYPTION_KEY
-        warn "TOKEN_ENCRYPTION_KEY was missing — auto-generated a random value."
+        warn "TOKEN_ENCRYPTION_KEY was missing/too short — auto-generated a random value."
         warn "Persist it in .env.production to keep OAuth tokens stable across deploys."
+        sed -i '/^TOKEN_ENCRYPTION_KEY=/d' .env.production 2>/dev/null || true
         echo "TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}" >> .env.production
     fi
-    if [ -z "${ADMIN_EMAIL}" ]; then
+    if [ -z "${ADMIN_EMAIL}" ] || ! echo "${ADMIN_EMAIL}" | grep -qE '^[^@]+@[^@]+\.[^@]+$'; then
         ADMIN_EMAIL="admin@iliagpt.com"
         export ADMIN_EMAIL
-        warn "ADMIN_EMAIL was missing — using default admin@iliagpt.com."
-        warn "Set a real ADMIN_EMAIL in .env.production at ${DEPLOY_PATH}."
+        warn "ADMIN_EMAIL was missing/invalid — using default admin@iliagpt.com."
+        sed -i '/^ADMIN_EMAIL=/d' .env.production 2>/dev/null || true
         echo "ADMIN_EMAIL=${ADMIN_EMAIL}" >> .env.production
     fi
-    if [ -z "${ADMIN_PASSWORD}" ]; then
+    if [ -z "${ADMIN_PASSWORD}" ] || [ "${#ADMIN_PASSWORD}" -lt 8 ]; then
         ADMIN_PASSWORD="$(openssl rand -base64 24)"
         export ADMIN_PASSWORD
-        warn "ADMIN_PASSWORD was missing — auto-generated a random value."
+        warn "ADMIN_PASSWORD was missing/too short — auto-generated a random value."
         warn "Persist it in .env.production at ${DEPLOY_PATH} to keep admin access."
+        sed -i '/^ADMIN_PASSWORD=/d' .env.production 2>/dev/null || true
         echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env.production
     fi
 

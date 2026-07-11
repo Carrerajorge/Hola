@@ -19,6 +19,30 @@ if (!envLoadedByBootstrap) {
 process.env.XAI_API_KEY = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
 normalizeOpenAICompatibleEnv(process.env);
 
+// Pre-validation: normalize empty/invalid optional env vars to undefined so
+// Zod's .optional() path triggers correctly. On the VPS these may exist as
+// empty strings which Zod treats as present-but-invalid, causing process.exit(1)
+// before auto-generation logic can run.
+function normalizeOptionalEnv(key: string, minLength?: number): void {
+  const val = process.env[key];
+  if (val === undefined) return;
+  if (val.trim() === "" || (minLength && val.trim().length < minLength)) {
+    delete process.env[key];
+  }
+}
+normalizeOptionalEnv("TOKEN_ENCRYPTION_KEY", 32);
+normalizeOptionalEnv("ADMIN_EMAIL");
+normalizeOptionalEnv("ADMIN_PASSWORD", 8);
+// SESSION_SECRET: auto-generate if missing or too short for production
+if (nodeEnv === "production") {
+  const ss = (process.env.SESSION_SECRET || "").trim();
+  if (!ss || ss.length < 32) {
+    const generated = randomBytes(32).toString("hex");
+    process.env.SESSION_SECRET = generated;
+    console.warn("⚠️  SESSION_SECRET was missing/too short — auto-generated for this run.");
+  }
+}
+
 const boolish = z
   .preprocess((v) => {
     if (typeof v !== "string") return v;
@@ -55,16 +79,16 @@ const envSchema = z.object({
   DEEPSEEK_MODEL: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
 
-  SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
+  SESSION_SECRET: z.string().default("dev-session-secret-replace-me"),
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
   // Token encryption (required for storing OAuth tokens securely in production)
-  TOKEN_ENCRYPTION_KEY: z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+  TOKEN_ENCRYPTION_KEY: z.string().optional(),
 
   // Admin / bootstrap (used by admin panel and production seeding)
-  ADMIN_EMAIL: z.string().email().optional(),
-  ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters").optional(),
+  ADMIN_EMAIL: z.string().optional(),
+  ADMIN_PASSWORD: z.string().optional(),
   ADMIN_REQUIRE_2FA: boolish.optional(),
   SEED_ON_START: boolish.optional(),
 
