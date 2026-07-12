@@ -133,9 +133,10 @@ export function getSession() {
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
   const isReplitDeployment = !!process.env.REPL_SLUG;
 
-  // SameSite=None is required for some OAuth callback flows (e.g. form_post) where the browser
-  // treats the redirect as cross-site. Only use it when the cookie is Secure.
-  const useNoneSameSite = isReplitDeployment || isProduction;
+  // SameSite=None is only needed for Replit deployments where callbacks cross domains.
+  // For standard deployments (iliagpt.com), Lax is correct and more secure — the
+  // Google OAuth callback is a same-site top-level navigation.
+  const useNoneSameSite = isReplitDeployment;
 
   return session({
     name: APP_SESSION_COOKIE_NAME,
