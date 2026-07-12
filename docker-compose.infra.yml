@@ -63,10 +63,13 @@ services:
       - "log_connections=on"
       - "-c"
       - "log_disconnections=on"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba.conf"
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     tmpfs:
       - /tmp:size=128m
     networks:

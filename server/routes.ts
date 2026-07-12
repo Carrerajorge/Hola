@@ -835,23 +835,56 @@ export async function registerRoutes(
                 }
               }
 
+              // Set provider-connected cookies BEFORE redirect so the
+              // status endpoints (/api/oauth/google/gemini-cli/status and
+              // /api/oauth/openai/codex/status) can detect the connection
+              // immediately, even if the session store hasn't propagated yet.
+              const cookieOpts = {
+                httpOnly: true,
+                secure: env.NODE_ENV === "production",
+                sameSite: "lax" as const,
+                maxAge: 30 * 60 * 1000,
+                path: "/",
+              };
+              if (providerHint === "gemini" || providerHint === "antigravity") {
+                const cookieVal = encodeURIComponent(JSON.stringify({
+                  provider: providerHint,
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie(`iliagpt_provider_connected_${providerHint}`, cookieVal, cookieOpts);
+                // Also set the gemini cookie when antigravity connects (same underlying service)
+                if (providerHint === "antigravity") {
+                  res.cookie("iliagpt_provider_connected_gemini", cookieVal, cookieOpts);
+                }
+              }
+              if (providerHint === "openai") {
+                const cookieVal = encodeURIComponent(JSON.stringify({
+                  provider: "openai",
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie("iliagpt_provider_connected_openai", cookieVal, cookieOpts);
+              }
+
               const doRedirect = () => res.redirect(redirectTarget);
               if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) {
-                    console.warn("[Auth] Google session save failed, retrying once:", saveErr);
-                    // Retry once after a short delay
-                    setTimeout(() => {
-                      sess.save((retryErr: any) => {
-                        if (retryErr) {
-                          console.error("[Auth] Google session save retry failed:", retryErr);
-                        }
-                        doRedirect();
-                      });
-                    }, 200);
-                    return;
-                  }
-                  doRedirect();
+                const retrySave = (attempt: number) => {
+                  sess.save((saveErr: any) => {
+                    if (saveErr && attempt < 3) {
+                      console.warn(`[Auth] Google session save failed (attempt ${attempt + 1}/3), retrying...`);
+                      setTimeout(() => retrySave(attempt + 1), 150 * (attempt + 1));
+                      return;
+                    }
+                    if (saveErr) {
+                      console.error("[Auth] Google session save failed after 3 attempts:", saveErr);
+                    }
+                    doRedirect();
+                  });
+                };
+                retrySave(0);
                 });
                 return;
               }

@@ -195,7 +195,7 @@ INITSTATE
     POSTGRES_DB="$(extract_env_value .env.production POSTGRES_DB || true)"
     POSTGRES_USER="${POSTGRES_USER:-postgres}"
     POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
-    DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
+    DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")?sslmode=disable"
 
     # Auth, session, and OAuth vars (required for app startup)
     SESSION_SECRET="${SESSION_SECRET:-$(extract_env_value .env.production SESSION_SECRET || true)}"

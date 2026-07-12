@@ -159,8 +159,7 @@ googleGeminiCliOAuthRouter.get(
         Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
       ) {
         const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
-        if (sessionGemini.accessToken && fastPathUserId) {
-          // Normalize expiresAt: values < 1e12 are seconds, convert to ms
+        if (sessionGemini.accessToken && sessionGemini.accessToken.length > 30 && fastPathUserId) {
           const normalizedExpiresAt = sessionGemini.expiresAt
             ? (sessionGemini.expiresAt > 1e12 ? sessionGemini.expiresAt : sessionGemini.expiresAt * 1000)
             : undefined;
@@ -214,12 +213,14 @@ googleGeminiCliOAuthRouter.get(
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
         // Re-persist to session so subsequent checks hit the fast path
-        // instead of relying on the cookie again.
+        // instead of relying on the cookie again. Do NOT store a fake
+        // accessToken — the fast-path re-persistence would write a bogus
+        // credential to auth-profiles.json, breaking all Gemini API calls.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
-              hasAccessToken: true,
-              accessToken: "from-cookie-fallback",
+              hasAccessToken: false,
+              accessToken: null,
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,
