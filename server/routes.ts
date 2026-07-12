@@ -885,7 +885,6 @@ export async function registerRoutes(
                   });
                 };
                 retrySave(0);
-                });
                 return;
               }
 
