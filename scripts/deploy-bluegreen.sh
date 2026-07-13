@@ -141,9 +141,10 @@ extract_env_value() {
     echo "$line"
 }
 
-# Build database URL
+# Build database URL (sslmode=disable: Docker-internal traffic needs no TLS
+# and the pg_hba.conf override allows non-SSL host connections)
 build_database_url() {
-    python3 -c "import sys, urllib.parse; user, password, host, port, dbname = sys.argv[1:]; print(f\"postgresql://{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@{host}:{port}/{urllib.parse.quote(dbname, safe='')}\")" \
+    python3 -c "import sys, urllib.parse; user, password, host, port, dbname = sys.argv[1:]; print(f\"postgresql://{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@{host}:{port}/{urllib.parse.quote(dbname, safe='')}?sslmode=disable\")" \
         "$1" "$2" "$3" "$4" "$5"
 }
 
@@ -278,6 +279,19 @@ INITSTATE
     docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
     free_slot_port "${INACTIVE_PORT}"
     
+    # ── Fix pg_hba.conf: ensure non-SSL connections from Docker subnets ──
+    # The persistent volume's pg_hba.conf may contain only hostssl entries,
+    # causing "pg_hba.conf rejects connection … no encryption" errors.
+    # Copy the override file into the running container and reload.
+    if [ -f "${DEPLOY_PATH}/scripts/pg_hba_override.conf" ]; then
+        log "Applying pg_hba_override.conf to PostgreSQL..."
+        docker cp "${DEPLOY_PATH}/scripts/pg_hba_override.conf" hola-postgres:/etc/postgresql/pg_hba_override.conf 2>/dev/null || true
+        docker exec hola-postgres pg_ctl reload -D /var/lib/postgresql/data 2>/dev/null || true
+    elif [ -f "${DEPLOY_PATH}/pg_hba_override.conf" ]; then
+        docker cp "${DEPLOY_PATH}/pg_hba_override.conf" hola-postgres:/etc/postgresql/pg_hba_override.conf 2>/dev/null || true
+        docker exec hola-postgres pg_ctl reload -D /var/lib/postgresql/data 2>/dev/null || true
+    fi
+
     # Create database backup before migrating
     log "Creating pre-migration database backup..."
     BACKUP_DIR="${DEPLOY_PATH}/backups"

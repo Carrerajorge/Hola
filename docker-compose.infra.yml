@@ -17,6 +17,13 @@ services:
       POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8 --locale=C"
     command:
       - "postgres"
+      # ── Authentication: allow non-SSL connections from Docker containers ──
+      # The data-directory pg_hba.conf may contain only hostssl entries after
+      # upgrades or manual edits, causing "pg_hba.conf rejects connection ...
+      # no encryption" errors for Docker-internal traffic.  Override it with
+      # a runtime hba_file that accepts both host and hostssl connections.
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba_override.conf"
       # ── Memory tuning (for 2GB container) ──
       - "-c"
       - "shared_buffers=256MB"
@@ -67,6 +74,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/pg_hba_override.conf:/etc/postgresql/pg_hba_override.conf:ro
     tmpfs:
       - /tmp:size=128m
     networks:
