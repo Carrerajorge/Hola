@@ -187,7 +187,8 @@ jobs:
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
             scripts/latest-main-guard.sh \
-            scripts/verify-public-runtime-contract.mjs
+            scripts/verify-public-runtime-contract.mjs \
+            scripts/pg_hba_override.conf
           do
             fetch_asset "${asset}"
           done
@@ -421,7 +422,7 @@ jobs:
           set -euo pipefail
           sync_ok=false
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               scripts/pg_hba_override.conf               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               sync_ok=true
               break
             fi
@@ -750,7 +751,8 @@ jobs:
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
             scripts/latest-main-guard.sh \
-            scripts/verify-public-runtime-contract.mjs
+            scripts/verify-public-runtime-contract.mjs \
+            scripts/pg_hba_override.conf
           do
             fetch_asset "${asset}"
           done
@@ -1021,7 +1023,7 @@ jobs:
           set -euo pipefail
           sync_ok=false
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               scripts/pg_hba_override.conf               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               sync_ok=true
               break
             fi
