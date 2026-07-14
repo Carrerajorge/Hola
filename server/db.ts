@@ -11,7 +11,6 @@ function resolveSslConfig(connectionString: string): false | { rejectUnauthorize
     if (sslmode === "verify-full" || sslmode === "verify-ca") return { rejectUnauthorized: true };
     if (sslmode) return { rejectUnauthorized: false };
   } catch {}
-  if (env.NODE_ENV === "production") return { rejectUnauthorized: false };
   return false;
 }
 
