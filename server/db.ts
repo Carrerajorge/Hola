@@ -3,22 +3,36 @@ import { createHash } from "node:crypto"; import { readFile } from "node:fs/prom
 
 const { Pool } = pkg;
 
+function resolveSslConfig(connectionString: string): false | { rejectUnauthorized: boolean } {
+  try {
+    const url = new URL(connectionString);
+    const sslmode = url.searchParams.get("sslmode");
+    if (sslmode === "disable") return false;
+    if (sslmode === "verify-full" || sslmode === "verify-ca") return { rejectUnauthorized: true };
+    if (sslmode) return { rejectUnauthorized: false };
+  } catch {}
+  return false;
+}
+
+const dbSsl = resolveSslConfig(env.DATABASE_URL);
+
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
-  max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 25 : 5), // Pool Size of at least 20 for pg_bouncer
-  min: env.DB_POOL_MIN || 0, // Pg_bouncer handles underlying pool, allow 0 at app level
-  idleTimeoutMillis: 3000,   // Close idle connections very fast (3s) to rely on pg_bouncer
-  connectionTimeoutMillis: 3000, // Fail extremely fast (3s)
+  ssl: dbSsl,
+  max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 25 : 5),
+  min: env.DB_POOL_MIN || 0,
+  idleTimeoutMillis: 3000,
+  connectionTimeoutMillis: 3000,
   allowExitOnIdle: false,
-  keepAlive: true,           // Required for stability behind TCP load balancing
+  keepAlive: true,
   application_name: 'iliagpt_server_write',
-  // Ensure predictable table resolution and add strict statement timeout for heavy AI traffic
   options: '-c search_path=public -c statement_timeout=15000',
 });
 
 // Read Replica Pool (Optional)
 const poolRead = env.DATABASE_READ_URL ? new Pool({
   connectionString: env.DATABASE_READ_URL,
+  ssl: resolveSslConfig(env.DATABASE_READ_URL),
   max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 20 : 5),
   min: env.DB_POOL_MIN || 2,
   idleTimeoutMillis: 10000,
