@@ -264,9 +264,18 @@ INITSTATE
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
+    # Remove stopped containers from previous deploys
+    docker ps -a --filter "status=exited" --filter "status=dead" -q | xargs -r docker rm -f 2>/dev/null || true
+    # Remove ALL unused images (not just dangling) to reclaim maximum space
     docker image prune -af || true
+    # Remove unused volumes (orphaned data volumes from previous containers)
+    docker volume prune -f || true
     docker builder prune -af || true
-    
+    # Remove old GHCR images from previous deploys that are no longer tagged
+    docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep "${REGISTRY}" | grep -v "${IMAGE_TAG}" | awk '{print $2}' | sort -u | xargs -r docker rmi -f 2>/dev/null || true
+    # Final space report
+    log "Disk space after cleanup: $(df -h / | tail -1 | awk '{print $4}') available"
+
     # Pull new images
     log "Pulling images..."
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
