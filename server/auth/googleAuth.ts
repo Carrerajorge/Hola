@@ -253,7 +253,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             },
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
-            expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+            expires_at: Date.now() + (tokens.expires_in || 3600) * 1000,
         };
 
         req.login(sessionUser, async (loginErr) => {

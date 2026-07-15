@@ -134,5 +134,9 @@ jobs:
         if: steps.check_secrets.outputs.has_secrets == 'true'
         run: |
           set -euo pipefail
+          # Upload cleanup script to VPS first (it may not exist yet on the deploy path)
+          scp -i ~/.ssh/deploy_key -P "${VPS_PORT}" -o StrictHostKeyChecking=accept-new \
+            scripts/cleanup-preview.sh "${VPS_USER}@${VPS_HOST}:${DEPLOY_PATH}/scripts/cleanup-preview.sh" \
+            2>/dev/null || true
           ssh -i ~/.ssh/deploy_key -p "${VPS_PORT}" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
             "cd '${DEPLOY_PATH}' && PREVIEW_SLUG='${PREVIEW_SLUG}' bash scripts/cleanup-preview.sh"

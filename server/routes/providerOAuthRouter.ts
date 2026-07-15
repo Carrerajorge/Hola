@@ -132,12 +132,12 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", "Error de autenticacion con OpenAI. Intenta de nuevo."));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow) {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Sesion OAuth expirada o invalida. Intenta de nuevo."));
     }
 
     const openAIWebOAuth = getOpenAIWebOAuthAvailability();
@@ -212,13 +212,14 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     res.send(renderCallbackPage("success", "OpenAI conectado exitosamente"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", "No se pudo completar la conexion con OpenAI. Intenta de nuevo."));
   }
 });
 
 router.get("/openai/status", async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    let userId: string | undefined;
+    try { userId = getUserId(req); } catch { /* unauthenticated */ }
     const globalStatus = await providersService.getGlobalTokenStatus("openai");
     const userStatus = userId
       ? await providersService.getUserTokenStatus(userId, "openai")
@@ -259,18 +260,24 @@ router.delete("/openai/disconnect", async (req: Request, res: Response) => {
 
 // ─── Gemini OAuth (Google OAuth2) ────────────────────────────────────────────
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+function getGoogleClientId(): string {
+  return process.env.GOOGLE_CLIENT_ID || "";
+}
+function getGoogleClientSecret(): string {
+  return process.env.GOOGLE_CLIENT_SECRET || "";
+}
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GEMINI_SCOPE = "https://www.googleapis.com/auth/generative-language";
+const GEMINI_SCOPE = "https://www.googleapis.com/auth/generative-language https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
 router.post("/gemini/start", async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    const clientId = getGoogleClientId();
+    const clientSecret = getGoogleClientSecret();
+    if (!clientId || !clientSecret) {
       return res.status(500).json({ error: "Google OAuth not configured" });
     }
 
@@ -295,14 +302,17 @@ router.post("/gemini/start", async (req: Request, res: Response) => {
       createdAt: Date.now(),
     });
 
+    const codeChallenge = generateCodeChallenge(codeVerifier);
     const params = new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
+      client_id: clientId,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: GEMINI_SCOPE,
       state: oauthState,
       access_type: "offline",
       prompt: "consent",
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
     });
 
     const authUrl = `${GOOGLE_AUTHORIZE_URL}?${params.toString()}`;
@@ -319,19 +329,20 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", "Error de autenticacion con Gemini. Intenta de nuevo."));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow || flow.provider !== "gemini") {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Sesion OAuth expirada o invalida. Intenta de nuevo."));
     }
 
     pkceFlowStore.delete(state as string);
 
     const redirectUri = getCallbackUrl(req, "gemini");
 
-    // Exchange code for tokens
+    // Exchange code for tokens (include both client_secret and code_verifier
+    // for Google OAuth which uses confidential-client PKCE)
     const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -339,8 +350,9 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
         grant_type: "authorization_code",
         code: code as string,
         redirect_uri: redirectUri,
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
+        client_id: getGoogleClientId(),
+        client_secret: getGoogleClientSecret(),
+        code_verifier: flow.codeVerifier,
       }),
     });
 
@@ -384,7 +396,7 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", "No se pudo completar la conexion con Gemini. Intenta de nuevo."));
   }
 });
 
@@ -502,7 +514,8 @@ router.post("/anthropic/key", async (req: Request, res: Response) => {
 
 router.get("/anthropic/status", async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    let userId: string | undefined;
+    try { userId = getUserId(req); } catch { /* unauthenticated */ }
     const globalStatus = await providersService.getGlobalTokenStatus("anthropic");
     const userStatus = userId
       ? await providersService.getUserTokenStatus(userId, "anthropic")
@@ -543,7 +556,8 @@ router.delete("/anthropic/disconnect", async (req: Request, res: Response) => {
 
 router.get("/status", async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    let userId: string | undefined;
+    try { userId = getUserId(req); } catch { /* unauthenticated */ }
     const providers: OAuthProvider[] = ["openai", "gemini", "anthropic"];
     const statuses: Record<string, any> = {};
 
@@ -582,11 +596,23 @@ router.get("/status", async (req: Request, res: Response) => {
 function renderCallbackPage(status: "success" | "error", message: string): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const isSuccess = status === "success";
+  const safeMessage = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const contentSecurityPolicy = [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data:",
+    "style-src 'unsafe-inline'",
+    `script-src 'nonce-${nonce}'`,
+    "connect-src 'self'",
+  ].join("; ");
 
   return `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OAuth ${isSuccess ? "Completado" : "Error"}</title>
   <style>
@@ -601,7 +627,7 @@ function renderCallbackPage(status: "success" | "error", message: string): strin
   <div class="card">
     <div class="icon">${isSuccess ? "✅" : "❌"}</div>
     <h1>${isSuccess ? "Conexión exitosa" : "Error de conexión"}</h1>
-    <p>${message}</p>
+    <p>${safeMessage}</p>
     <p style="margin-top: 20px; font-size: 14px;">Puedes cerrar esta ventana.</p>
   </div>
   <script nonce="${nonce}">
