@@ -48,7 +48,17 @@ if [[ -n "${GHCR_TOKEN:-}" ]]; then
   echo "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" -u "${GHCR_USERNAME}" --password-stdin >/dev/null
 fi
 
-# 2) Ensure all slot images exist before compose tries to start containers.
+# 2) Reclaim disk space before pulling new images.
+echo "[preview] Cleaning up old Docker artifacts..."
+docker container prune -f 2>/dev/null || true
+docker ps -a --filter "status=exited" --filter "status=dead" -q | xargs -r docker rm -f 2>/dev/null || true
+docker image prune -af 2>/dev/null || true
+docker volume prune -f 2>/dev/null || true
+docker builder prune -af 2>/dev/null || true
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep "ghcr.io/carrerajorge" | grep -v "${IMAGE_TAG}" | awk '{print $2}' | sort -u | xargs -r docker rmi -f 2>/dev/null || true
+echo "[preview] Disk after cleanup: $(df -h / | tail -1 | awk '{print $4}') available"
+
+# 3) Ensure all slot images exist before compose tries to start containers.
 for image in app sandbox ocr; do
   docker pull "ghcr.io/carrerajorge/iliagpt-${image}:${IMAGE_TAG}" >/dev/null
 done
