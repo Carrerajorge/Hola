@@ -99,6 +99,12 @@ RUN npm run build
 RUN npm prune --legacy-peer-deps --omit=dev
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
+
+# Remove massive CUDA binaries from node-llama-cpp (~1.5GB) — VPS is CPU-only
+RUN find /app -path '*/node-llama-cpp/*cuda*' -type f -delete 2>/dev/null || true \
+  && find /app -path '*/node-llama-cpp/*vulkan*' -type f -delete 2>/dev/null || true \
+  && find /app -name 'libggml-cuda.so' -delete 2>/dev/null || true \
+  && find /app -name 'libggml-vulkan.so' -delete 2>/dev/null || true
 # ============================================
 # Stage 2: Sandbox Runner
 # Reuse the already-built builder stage so this target does not need a second
