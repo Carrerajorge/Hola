@@ -440,6 +440,20 @@ jobs:
             nginx/maintenance.html \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
+      - name: Pre-pull disk recovery on VPS
+        continue-on-error: true
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            'echo "=== Disk before cleanup ===" && df -h / && \
+             docker container prune -f 2>/dev/null; \
+             docker image prune -af 2>/dev/null; \
+             docker volume prune -f 2>/dev/null; \
+             docker builder prune -af --force 2>/dev/null; \
+             find /var/lib/docker/containers -name "*-json.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null; \
+             echo "=== Disk after cleanup ===" && df -h /'
+
       - name: Run predeploy startup gate
         run: |
           set -euo pipefail
@@ -1039,6 +1053,21 @@ jobs:
             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
             nginx/maintenance.html \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
+
+      - name: Pre-pull disk recovery on VPS
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        continue-on-error: true
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            'echo "=== Disk before cleanup ===" && df -h / && \
+             docker container prune -f 2>/dev/null; \
+             docker image prune -af 2>/dev/null; \
+             docker volume prune -f 2>/dev/null; \
+             docker builder prune -af --force 2>/dev/null; \
+             find /var/lib/docker/containers -name "*-json.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null; \
+             echo "=== Disk after cleanup ===" && df -h /'
 
       - name: Run predeploy startup gate
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'

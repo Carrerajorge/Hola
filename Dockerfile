@@ -169,6 +169,14 @@ COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 COPY --chown=iliagpt:nodejs --from=builder /app/server/openclaw ./server/openclaw
 
+# Remove heavyweight CUDA/GPU binaries from openclaw — they add ~2GB to the
+# image and are not used when the server calls cloud LLM APIs. Local inference
+# falls back to CPU-only binaries automatically.
+RUN rm -rf server/openclaw/node_modules/@node-llama-cpp/linux-x64-cuda-ext \
+  server/openclaw/node_modules/@node-llama-cpp/linux-arm64-cuda-ext \
+  server/openclaw/node_modules/@node-llama-cpp/*/bins/*/cuda \
+  && find server/openclaw/node_modules -name 'libggml-cuda*' -delete 2>/dev/null; true
+
 # Bridge openclaw's dependency tree into the root resolution scope.
 # The esbuild bundle externalizes bare imports, but some openclaw source files
 # are pulled in via relative imports. Their transitive deps (pi-coding-agent,
