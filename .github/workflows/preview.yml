@@ -79,6 +79,19 @@ jobs:
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
           ssh-keyscan -p "${VPS_PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
+      - name: Pre-pull disk recovery on VPS
+        if: steps.check_secrets.outputs.has_secrets == 'true'
+        continue-on-error: true
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT}" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
+            'echo "=== Disk before cleanup ===" && df -h / && \
+             docker container prune -f 2>/dev/null; \
+             docker image prune -af 2>/dev/null; \
+             docker volume prune -f 2>/dev/null; \
+             docker builder prune -af --force 2>/dev/null; \
+             find /var/lib/docker/containers -name "*-json.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null; \
+             echo "=== Disk after cleanup ===" && df -h /'
+
       - name: Deploy preview on VPS
         if: steps.check_secrets.outputs.has_secrets == 'true'
         run: |
