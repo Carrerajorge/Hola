@@ -220,9 +220,13 @@ INITSTATE
     CEREBRAS_API_KEY="${CEREBRAS_API_KEY:-$(extract_env_value .env.production CEREBRAS_API_KEY || true)}"
     CEREBRAS_BASE_URL="${CEREBRAS_BASE_URL:-$(extract_env_value .env.production CEREBRAS_BASE_URL || true)}"
 
+    # OpenAI OAuth client ID for direct web OAuth (distinct from the Codex CLI client)
+    OPENAI_OAUTH_CLIENT_ID="${OPENAI_OAUTH_CLIENT_ID:-$(extract_env_value .env.production OPENAI_OAUTH_CLIENT_ID || true)}"
+
     export SESSION_SECRET TOKEN_ENCRYPTION_KEY CANONICAL_DOMAIN BASE_URL
     export GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET ADMIN_EMAIL ADMIN_PASSWORD
     export GEMINI_API_KEY GOOGLE_API_KEY OPENAI_API_KEY OPENAI_BASE_URL
+    export OPENAI_OAUTH_CLIENT_ID
     export ANTHROPIC_API_KEY XAI_API_KEY OPENROUTER_API_KEY
     export DEEPSEEK_API_KEY DEEPSEEK_BASE_URL CEREBRAS_API_KEY CEREBRAS_BASE_URL
 
@@ -261,22 +265,32 @@ INITSTATE
         echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env.production
     fi
 
-    # Clean up old docker artifacts to prevent disk exhaustion
-    log "Cleaning up old docker containers and images..."
+    # Stop the inactive slot FIRST so its image layers can be freed by prune
+    log "Stopping existing ${INACTIVE_SLOT} containers..."
+    docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
+    free_slot_port "${INACTIVE_PORT}"
+
+    # Aggressive disk cleanup to prevent "no space left on device" on pull
+    log "Cleaning up old docker artifacts to free disk space..."
+    log "Disk usage before cleanup:"
+    df -h / 2>/dev/null || true
+    docker system df 2>/dev/null || true
     docker container prune -f || true
     docker image prune -af || true
-    docker builder prune -af || true
-    
+    docker volume prune -f || true
+    docker builder prune -af --force || true
+    # Remove old container logs consuming disk
+    find /var/lib/docker/containers -name '*-json.log' -size +10M -exec truncate -s 0 {} \; 2>/dev/null || true
+    # Keep only the latest 2 backups
+    ls -t "${DEPLOY_PATH}/backups/db_backup_"*.sql.gz 2>/dev/null | tail -n +3 | xargs -I {} rm -f {} || true
+    log "Disk usage after cleanup:"
+    df -h / 2>/dev/null || true
+
     # Pull new images
     log "Pulling images..."
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
     docker pull "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
     docker pull "${REGISTRY}/iliagpt-ocr:${IMAGE_TAG}" || true
-    
-    # Stop any existing containers in the inactive slot
-    log "Stopping existing ${INACTIVE_SLOT} containers..."
-    docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
-    free_slot_port "${INACTIVE_PORT}"
     
     # Create database backup before migrating
     log "Creating pre-migration database backup..."
@@ -329,6 +343,7 @@ INITSTATE
     GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
     OPENAI_API_KEY="${OPENAI_API_KEY}" \
     OPENAI_BASE_URL="${OPENAI_BASE_URL}" \
+    OPENAI_OAUTH_CLIENT_ID="${OPENAI_OAUTH_CLIENT_ID}" \
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
     XAI_API_KEY="${XAI_API_KEY}" \
     OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \

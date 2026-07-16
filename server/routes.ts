@@ -833,6 +833,21 @@ export async function registerRoutes(
                     expiresAt: directTokens?.expires_at || null,
                   };
                 }
+                // Set a fallback cookie so the status endpoint can detect the
+                // connection even if the session store hasn't flushed yet.
+                const connCookieName = `iliagpt_provider_connected_${providerHint}`;
+                res.cookie(connCookieName, JSON.stringify({
+                  provider: providerHint,
+                  email: email || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }), {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
               }
 
               const doRedirect = () => res.redirect(redirectTarget);

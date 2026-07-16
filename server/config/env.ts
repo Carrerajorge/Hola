@@ -103,6 +103,8 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
 
+  OPENAI_OAUTH_CLIENT_ID: z.string().optional(),
+
   AUTH0_DOMAIN: z.string().optional(),
   AUTH0_CLIENT_ID: z.string().optional(),
   AUTH0_CLIENT_SECRET: z.string().optional(),
