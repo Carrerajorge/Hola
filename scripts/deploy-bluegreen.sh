@@ -266,6 +266,14 @@ INITSTATE
     docker container prune -f || true
     docker image prune -af || true
     docker builder prune -af || true
+    # Truncate container logs that can grow unbounded
+    find /var/lib/docker/containers -name "*.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null || true
+    # Remove dangling volumes
+    docker volume prune -f 2>/dev/null || true
+    # Clean apt cache and tmp
+    rm -rf /tmp/npm-* /tmp/pnpm-* 2>/dev/null || true
+    apt-get clean 2>/dev/null || true
+    log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
     
     # Pull new images
     log "Pulling images..."

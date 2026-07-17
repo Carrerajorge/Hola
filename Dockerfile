@@ -80,6 +80,20 @@ RUN set -eux; \
   printf 'stub\n' > server/openclaw/src/canvas-host/a2ui/.bundle.hash && \
   rm -rf server/openclaw/vendor/a2ui server/openclaw/apps/shared/OpenClawKit/Tools/CanvasA2UI); \
   pnpm --dir server/openclaw build:docker
+# Remove massive optional binaries that are not needed at runtime.
+# @node-llama-cpp ships ~500MB+ of CUDA/Vulkan GPU libraries that inflate
+# the image beyond the VPS disk capacity.
+RUN set -eux; \
+  rm -rf server/openclaw/node_modules/@node-llama-cpp/*/bins 2>/dev/null || true; \
+  rm -rf server/openclaw/node_modules/@node-llama-cpp/*/llama 2>/dev/null || true; \
+  rm -rf server/openclaw/node_modules/node-llama-cpp 2>/dev/null || true; \
+  rm -rf server/openclaw/node_modules/.pnpm/*node-llama-cpp*/node_modules/@node-llama-cpp/*/bins 2>/dev/null || true; \
+  rm -rf server/openclaw/node_modules/.pnpm/*cuda* 2>/dev/null || true; \
+  rm -rf server/openclaw/node_modules/.pnpm/*vulkan* 2>/dev/null || true; \
+  rm -rf server/openclaw/node_modules/@node-llama-cpp 2>/dev/null || true; \
+  find server/openclaw/node_modules -name "*.so" -size +50M -delete 2>/dev/null || true; \
+  find server/openclaw/node_modules -name "*.node" -path "*cuda*" -delete 2>/dev/null || true; \
+  echo "Pruned large optional GPU binaries from openclaw node_modules"
 # Build client and server assets
 ARG APP_VERSION=dev
 ARG APP_SHA=dev
