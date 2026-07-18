@@ -87,7 +87,7 @@ describe("LoginPage", () => {
     expect(screen.getByTestId("button-login-antigravity")).toBeVisible();
     expect(screen.getByText("Continuar con Google")).toBeVisible();
     expect(screen.getByText("Continuar con Gemini")).toBeVisible();
-    expect(screen.getByText("Continuar con ChatGPT")).toBeVisible();
+    expect(screen.getByText("Continuar con OpenAI")).toBeVisible();
     expect(screen.getByText("Continuar con Antigravity")).toBeVisible();
   });
 
