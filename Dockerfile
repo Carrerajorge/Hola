@@ -94,6 +94,16 @@ RUN set -eux; \
   find server/openclaw/node_modules -name "*.so" -size +50M -delete 2>/dev/null || true; \
   find server/openclaw/node_modules -name "*.node" -path "*cuda*" -delete 2>/dev/null || true; \
   echo "Pruned large optional GPU binaries from openclaw node_modules"
+# Additional size reduction: remove test/doc files and large non-essential assets
+# from BOTH root and openclaw node_modules to reduce final image size.
+RUN set -eux; \
+  for nm in node_modules server/openclaw/node_modules; do \
+    find "$nm" -type d \( -name "__tests__" -o -name "test" -o -name "tests" -o -name ".github" -o -name "docs" -o -name "example" -o -name "examples" \) -exec rm -rf {} + 2>/dev/null || true; \
+    find "$nm" -type f \( -name "*.md" -o -name "CHANGELOG*" -o -name "LICENSE*" -o -name "*.map" -o -name "*.ts" ! -name "*.d.ts" \) -size +50k -delete 2>/dev/null || true; \
+    find "$nm" -name ".cache" -type d -exec rm -rf {} + 2>/dev/null || true; \
+  done; \
+  rm -rf server/openclaw/.git 2>/dev/null || true; \
+  echo "Pruned test/doc/map files from node_modules"
 # Build client and server assets
 ARG APP_VERSION=dev
 ARG APP_SHA=dev
@@ -113,6 +123,12 @@ RUN npm run build
 RUN npm prune --legacy-peer-deps --omit=dev
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
+# Final node_modules cleanup after pruning dev deps.
+# Remove source maps, markdown, and empty directories not needed at runtime.
+RUN set -eux; \
+  find node_modules server/openclaw/node_modules -name "*.map" -type f -size +100k -delete 2>/dev/null || true; \
+  find node_modules server/openclaw/node_modules -type d -empty -delete 2>/dev/null || true; \
+  echo "Final node_modules cleanup complete"
 # ============================================
 # Stage 2: Sandbox Runner
 # Reuse the already-built builder stage so this target does not need a second
@@ -183,6 +199,12 @@ COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 COPY --chown=iliagpt:nodejs --from=builder /app/server/openclaw ./server/openclaw
 
+# Clean up openclaw files not needed at runtime (git history, tests, docs).
+RUN rm -rf server/openclaw/.git 2>/dev/null || true \
+  && find server/openclaw -type d \( -name "test" -o -name "tests" -o -name "__tests__" -o -name "spec" \) -exec rm -rf {} + 2>/dev/null || true \
+  && rm -rf server/openclaw/docs 2>/dev/null || true \
+  && echo "Cleaned up openclaw non-runtime files"
+
 # Bridge openclaw's dependency tree into the root resolution scope.
 # The esbuild bundle externalizes bare imports, but some openclaw source files
 # are pulled in via relative imports. Their transitive deps (pi-coding-agent,
@@ -214,6 +236,8 @@ RUN cp -a /app/server/openclaw/extensions /extensions \
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
 RUN node ./node_modules/playwright/cli.js install chromium \
   && chown -R iliagpt:nodejs /app/.playwright-browsers
+# Remove any cached non-chromium browsers to save disk
+RUN rm -rf /app/.playwright-browsers/firefox-* /app/.playwright-browsers/webkit-* /app/.playwright-browsers/ffmpeg-* 2>/dev/null || true
 
 # Create temp directories for uploads/sandbox/logs with correct permissions
 RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data /app/logs \

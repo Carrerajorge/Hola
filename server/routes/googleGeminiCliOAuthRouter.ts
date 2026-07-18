@@ -215,11 +215,13 @@ googleGeminiCliOAuthRouter.get(
 
         // Re-persist to session so subsequent checks hit the fast path
         // instead of relying on the cookie again.
+        // hasAccessToken is false because the cookie fallback does not carry
+        // a real OAuth token — this prevents the session fast path from
+        // calling persistGeminiCliCredentialsFromGoogleTokens with a fake value.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
-              hasAccessToken: true,
-              accessToken: "from-cookie-fallback",
+              hasAccessToken: false,
               email: cookieFallback.email || null,
               connectedAt: Date.now(),
               userId: fallbackUserId,

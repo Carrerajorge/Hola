@@ -261,30 +261,33 @@ INITSTATE
         echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env.production
     fi
 
+    # Stop inactive slot containers FIRST to free their image layers before pulling new ones.
+    log "Stopping existing ${INACTIVE_SLOT} containers to free disk..."
+    docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
+    free_slot_port "${INACTIVE_PORT}"
+
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
-    docker image prune -af || true
-    docker builder prune -af || true
     # Truncate container logs that can grow unbounded
     find /var/lib/docker/containers -name "*.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null || true
     # Remove dangling volumes
     docker volume prune -f 2>/dev/null || true
+    docker builder prune -af 2>/dev/null || true
     # Clean apt cache and tmp
-    rm -rf /tmp/npm-* /tmp/pnpm-* 2>/dev/null || true
+    rm -rf /tmp/npm-* /tmp/pnpm-* /var/cache/apt/archives/*.deb 2>/dev/null || true
     apt-get clean 2>/dev/null || true
+    # Remove ALL unused images (frees old tags from previous deploys)
+    docker image prune -af || true
     log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
-    
-    # Pull new images
+
+    # Pull new images one at a time, pruning between pulls to keep disk usage low
     log "Pulling images..."
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
+    docker image prune -f 2>/dev/null || true
     docker pull "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
+    docker image prune -f 2>/dev/null || true
     docker pull "${REGISTRY}/iliagpt-ocr:${IMAGE_TAG}" || true
-    
-    # Stop any existing containers in the inactive slot
-    log "Stopping existing ${INACTIVE_SLOT} containers..."
-    docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
-    free_slot_port "${INACTIVE_PORT}"
     
     # Create database backup before migrating
     log "Creating pre-migration database backup..."
