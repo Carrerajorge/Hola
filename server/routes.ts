@@ -835,6 +835,26 @@ export async function registerRoutes(
                 }
               }
 
+              // Set a short-lived cookie as a fallback signal so the status
+              // endpoint can detect a fresh Gemini/Antigravity connection even
+              // if the session store hasn't propagated the flag yet.
+              if (providerHint === "gemini" || providerHint === "antigravity") {
+                const cookieName = `iliagpt_provider_connected_${providerHint}`;
+                const cookieValue = encodeURIComponent(JSON.stringify({
+                  provider: providerHint,
+                  email: userEmail || null,
+                  userId: String(userId),
+                  ts: Date.now(),
+                }));
+                res.cookie(cookieName, cookieValue, {
+                  httpOnly: true,
+                  secure: env.NODE_ENV === "production",
+                  sameSite: "lax",
+                  maxAge: 30 * 60 * 1000,
+                  path: "/",
+                });
+              }
+
               const doRedirect = () => res.redirect(redirectTarget);
               if (sess?.save) {
                 sess.save((saveErr: any) => {
