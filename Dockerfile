@@ -98,7 +98,14 @@ RUN set -eux; \
 # from BOTH root and openclaw node_modules to reduce final image size.
 RUN set -eux; \
   for nm in node_modules server/openclaw/node_modules; do \
-    find "$nm" -type d \( -name "__tests__" -o -name "test" -o -name "tests" -o -name ".github" -o -name "docs" -o -name "example" -o -name "examples" \) -exec rm -rf {} + 2>/dev/null || true; \
+    find "$nm" -type d \( -name "__tests__" -o -name "test" -o -name "tests" -o -name ".github" -o -name "example" -o -name "examples" \) \
+      -not -path "*/@iconify/utils/*" \
+      -not -path "*/emoji/test" \
+      -exec rm -rf {} + 2>/dev/null || true; \
+    find "$nm" -maxdepth 3 -type d -name "docs" \
+      -not -path "*/googleapis/*" \
+      -not -path "*/apis/docs" \
+      -exec rm -rf {} + 2>/dev/null || true; \
     find "$nm" -type f \( -name "*.md" -o -name "CHANGELOG*" -o -name "LICENSE*" -o -name "*.map" -o -name "*.ts" ! -name "*.d.ts" \) -size +50k -delete 2>/dev/null || true; \
     find "$nm" -name ".cache" -type d -exec rm -rf {} + 2>/dev/null || true; \
   done; \
@@ -201,7 +208,10 @@ COPY --chown=iliagpt:nodejs --from=builder /app/server/openclaw ./server/opencla
 
 # Clean up openclaw files not needed at runtime (git history, tests, docs).
 RUN rm -rf server/openclaw/.git 2>/dev/null || true \
-  && find server/openclaw -type d \( -name "test" -o -name "tests" -o -name "__tests__" -o -name "spec" \) -exec rm -rf {} + 2>/dev/null || true \
+  && find server/openclaw -type d \( -name "test" -o -name "tests" -o -name "__tests__" -o -name "spec" \) \
+    -not -path "*/@iconify/utils/*" \
+    -not -path "*/emoji/test" \
+    -exec rm -rf {} + 2>/dev/null || true \
   && rm -rf server/openclaw/docs 2>/dev/null || true \
   && echo "Cleaned up openclaw non-runtime files"
 
