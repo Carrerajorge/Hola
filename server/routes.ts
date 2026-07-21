@@ -836,9 +836,9 @@ export async function registerRoutes(
               }
 
               // Set a short-lived cookie as a fallback signal so the status
-              // endpoint can detect a fresh Gemini/Antigravity connection even
+              // endpoint can detect a fresh provider connection even
               // if the session store hasn't propagated the flag yet.
-              if (providerHint === "gemini" || providerHint === "antigravity") {
+              if (providerHint === "gemini" || providerHint === "antigravity" || providerHint === "openai") {
                 const cookieName = `iliagpt_provider_connected_${providerHint}`;
                 const cookieValue = encodeURIComponent(JSON.stringify({
                   provider: providerHint,
