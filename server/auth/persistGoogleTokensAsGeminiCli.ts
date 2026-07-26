@@ -124,4 +124,25 @@ export async function persistGoogleTokensAsGeminiCli(
   } catch {
     // Non-critical: direct persistence already succeeded
   }
+
+  // DB persistence via providersService (survives container restarts)
+  try {
+    const { providersService } = await import("../services/providersService.js");
+    const expiresAt = credential.expires > 0 ? credential.expires : null;
+    const scope = "https://www.googleapis.com/auth/generative-language";
+    await providersService.saveUserToken(
+      userId,
+      "gemini",
+      credential.access,
+      credential.refresh || null,
+      expiresAt,
+      scope,
+    );
+    console.info("[GeminiCliPersist] Also persisted to DB for user:", userId);
+  } catch (dbError: any) {
+    console.warn(
+      "[GeminiCliPersist] DB persistence failed (non-blocking):",
+      dbError?.message || dbError,
+    );
+  }
 }
