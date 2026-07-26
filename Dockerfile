@@ -129,7 +129,7 @@ RUN npm run build
 # Convert to production-only deps for runtime images
 RUN npm prune --legacy-peer-deps --omit=dev
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
-RUN node -e "console.log(require.resolve('ajv/package.json'))"
+RUN node -e "require.resolve('passport/package.json'); require.resolve('express-session/package.json'); console.log('Auth packages survived pruning')"
 # Final node_modules cleanup after pruning dev deps.
 # Remove source maps, markdown, and empty directories not needed at runtime.
 RUN set -eux; \

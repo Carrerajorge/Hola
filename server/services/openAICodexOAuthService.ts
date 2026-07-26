@@ -198,9 +198,13 @@ async function persistOpenAICodexOAuthCredentials(
     order: [profileId],
   });
 
-  const config = await loadValidConfigOrThrow();
-  await ensureOpenClawModelsJson(config, agentDir);
-  await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  try {
+    const config = await loadValidConfigOrThrow();
+    await ensureOpenClawModelsJson(config, agentDir);
+    await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  } catch (configError: any) {
+    console.warn("[OpenAI OAuth] OpenClaw config sync failed (non-blocking):", configError?.message || configError);
+  }
 }
 
 function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {
