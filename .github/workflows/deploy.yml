@@ -347,30 +347,40 @@ jobs:
           mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
           mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
 
-          for host in "${uniq_hosts[@]}"; do
-            for port in "${uniq_ports[@]}"; do
-              echo "Trying ${VPS_USER}@${host}:${port}..."
-              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
-              ssh_probe_opts=(
-                -i ~/.ssh/deploy_key
-                -p "$port"
-                -o StrictHostKeyChecking=accept-new
-                -o BatchMode=yes
-                -o ConnectTimeout=8
-                -o PubkeyAcceptedAlgorithms=+ssh-rsa
-                -o HostKeyAlgorithms=+ssh-rsa
-              )
-              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
-                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
-                echo "host=${host}" >> "$GITHUB_OUTPUT"
-                echo "port=${port}" >> "$GITHUB_OUTPUT"
-                echo "✓ Selected endpoint ${host}:${port}"
-                exit 0
-              fi
+          for attempt in 1 2 3; do
+            echo "=== SSH probe attempt ${attempt}/3 ==="
+            for host in "${uniq_hosts[@]}"; do
+              for port in "${uniq_ports[@]}"; do
+                echo "Trying ${VPS_USER}@${host}:${port}..."
+                ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+                ssh_probe_opts=(
+                  -i ~/.ssh/deploy_key
+                  -p "$port"
+                  -o StrictHostKeyChecking=accept-new
+                  -o BatchMode=yes
+                  -o ConnectTimeout=20
+                  -o ServerAliveInterval=5
+                  -o ServerAliveCountMax=3
+                  -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                  -o HostKeyAlgorithms=+ssh-rsa
+                )
+                if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                   ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                  echo "host=${host}" >> "$GITHUB_OUTPUT"
+                  echo "port=${port}" >> "$GITHUB_OUTPUT"
+                  echo "✓ Selected endpoint ${host}:${port}"
+                  exit 0
+                fi
+              done
             done
+            if [ "${attempt}" -lt 3 ]; then
+              delay=$((attempt * 15))
+              echo "All endpoints unreachable on attempt ${attempt}; retrying in ${delay}s..."
+              sleep "${delay}"
+            fi
           done
 
-          echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
+          echo "::error::No reachable VPS endpoint found after 3 attempts (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
           exit 1
 
       - name: Validate resolved target inputs
