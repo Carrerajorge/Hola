@@ -198,9 +198,17 @@ async function persistOpenAICodexOAuthCredentials(
     order: [profileId],
   });
 
-  const config = await loadValidConfigOrThrow();
-  await ensureOpenClawModelsJson(config, agentDir);
-  await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  try {
+    const config = await loadValidConfigOrThrow();
+    await ensureOpenClawModelsJson(config, agentDir);
+  } catch {
+    // OpenClaw config may not exist in Docker or fresh deployments
+  }
+  try {
+    await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  } catch {
+    // Non-critical: auth-profiles were already persisted above
+  }
 }
 
 function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {

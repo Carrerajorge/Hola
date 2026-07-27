@@ -98,19 +98,24 @@ RUN set -eux; \
 # from BOTH root and openclaw node_modules to reduce final image size.
 RUN set -eux; \
   for nm in node_modules server/openclaw/node_modules; do \
-    find "$nm" -type d \( -name "__tests__" -o -name "test" -o -name "tests" -o -name ".github" -o -name "example" -o -name "examples" \) \
+    find "$nm" -type d \( -name "__tests__" -o -name ".github" -o -name "example" -o -name "examples" \) \
       -not -path "*/@iconify/utils/*" \
-      -not -path "*/emoji/test" \
+      -not -path "*/passport*" \
+      -not -path "*/express-session*" \
+      -not -path "*/googleapis/*" \
+      -not -path "*/mermaid*" \
+      -not -path "*/openclaw*" \
       -exec rm -rf {} + 2>/dev/null || true; \
     find "$nm" -maxdepth 3 -type d -name "docs" \
       -not -path "*/googleapis/*" \
       -not -path "*/apis/docs" \
+      -not -path "*/@google*" \
       -exec rm -rf {} + 2>/dev/null || true; \
-    find "$nm" -type f \( -name "*.md" -o -name "CHANGELOG*" -o -name "LICENSE*" -o -name "*.map" -o -name "*.ts" ! -name "*.d.ts" \) -size +50k -delete 2>/dev/null || true; \
+    find "$nm" -type f \( -name "*.md" -o -name "CHANGELOG*" -o -name "*.map" \) -size +100k -delete 2>/dev/null || true; \
     find "$nm" -name ".cache" -type d -exec rm -rf {} + 2>/dev/null || true; \
   done; \
   rm -rf server/openclaw/.git 2>/dev/null || true; \
-  echo "Pruned test/doc/map files from node_modules"
+  echo "Pruned non-essential files from node_modules"
 # Build client and server assets
 ARG APP_VERSION=dev
 ARG APP_SHA=dev
