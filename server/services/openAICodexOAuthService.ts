@@ -175,32 +175,68 @@ async function persistOpenAICodexOAuthCredentials(
 ): Promise<void> {
   const agentDir = resolveUserScopedAgentDir(userId);
   if (!agentDir) {
-    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
+    console.warn("[OpenAICodexOAuth] No agent dir for user:", userId, "— saving to DB only.");
+    try {
+      const { providersService } = await import("./providersService.js");
+      await providersService.saveUserToken(
+        userId,
+        "openai",
+        credentials.access,
+        credentials.refresh || null,
+        credentials.expires > 0 ? credentials.expires : null,
+        "openid profile email offline_access",
+      );
+    } catch (dbErr: unknown) {
+      console.warn("[OpenAICodexOAuth] DB fallback persistence failed:", dbErr instanceof Error ? dbErr.message : dbErr);
+    }
+    return;
   }
 
   const profileId = buildProfileId(credentials);
-  upsertAuthProfile({
-    profileId,
-    agentDir,
-    credential: {
-      type: "oauth",
+  try {
+    upsertAuthProfile({
+      profileId,
+      agentDir,
+      credential: {
+        type: "oauth",
+        provider: PROVIDER_ID,
+        access: credentials.access,
+        refresh: credentials.refresh,
+        expires: credentials.expires,
+        accountId: credentials.accountId,
+      },
+    });
+
+    await setAuthProfileOrder({
+      agentDir,
       provider: PROVIDER_ID,
-      access: credentials.access,
-      refresh: credentials.refresh,
-      expires: credentials.expires,
-      accountId: credentials.accountId,
-    },
-  });
+      order: [profileId],
+    });
+  } catch (profileErr: unknown) {
+    console.warn("[OpenAICodexOAuth] Auth profile persistence failed (non-critical):", profileErr instanceof Error ? profileErr.message : profileErr);
+  }
 
-  await setAuthProfileOrder({
-    agentDir,
-    provider: PROVIDER_ID,
-    order: [profileId],
-  });
+  try {
+    const config = await loadValidConfigOrThrow();
+    await ensureOpenClawModelsJson(config, agentDir);
+    await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  } catch (configErr: unknown) {
+    console.warn("[OpenAICodexOAuth] OpenClaw config integration skipped (non-critical):", configErr instanceof Error ? configErr.message : configErr);
+  }
 
-  const config = await loadValidConfigOrThrow();
-  await ensureOpenClawModelsJson(config, agentDir);
-  await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  try {
+    const { providersService } = await import("./providersService.js");
+    await providersService.saveUserToken(
+      userId,
+      "openai",
+      credentials.access,
+      credentials.refresh || null,
+      credentials.expires > 0 ? credentials.expires : null,
+      "openid profile email offline_access",
+    );
+  } catch (dbErr: unknown) {
+    console.warn("[OpenAICodexOAuth] DB persistence failed (non-critical):", dbErr instanceof Error ? dbErr.message : dbErr);
+  }
 }
 
 function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {
@@ -517,19 +553,54 @@ function serializeFlow(flow: OpenAICodexFlowRecord): OpenAICodexOAuthFlowState {
 export async function getOpenAICodexOAuthStatus(
   userId?: string | null,
 ): Promise<OpenAICodexOAuthStatus> {
-  const storedProfile = await resolveStoredProfile(userId);
+  let storedProfile: Awaited<ReturnType<typeof resolveStoredProfile>> = null;
+  try {
+    storedProfile = await resolveStoredProfile(userId);
+  } catch {
+    // File-based profile lookup failed; continue to DB fallback
+  }
   const accountId =
     storedProfile?.credential && "accountId" in storedProfile.credential
       ? storedProfile.credential.accountId ?? null
       : null;
 
+  if (storedProfile) {
+    return {
+      connected: true,
+      providerId: PROVIDER_ID,
+      defaultModelRef: DEFAULT_MODEL_REF,
+      defaultModelId: DEFAULT_MODEL_ID,
+      profileId: storedProfile.profileId,
+      accountId,
+    };
+  }
+
+  if (userId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(userId, "openai");
+      if (userStatus.connected) {
+        return {
+          connected: true,
+          providerId: PROVIDER_ID,
+          defaultModelRef: DEFAULT_MODEL_REF,
+          defaultModelId: DEFAULT_MODEL_ID,
+          profileId: `${PROVIDER_ID}:db-fallback`,
+          accountId: null,
+        };
+      }
+    } catch {
+      // DB unavailable
+    }
+  }
+
   return {
-    connected: Boolean(storedProfile),
+    connected: false,
     providerId: PROVIDER_ID,
     defaultModelRef: DEFAULT_MODEL_REF,
     defaultModelId: DEFAULT_MODEL_ID,
-    profileId: storedProfile?.profileId ?? null,
-    accountId,
+    profileId: null,
+    accountId: null,
   };
 }
 
