@@ -270,21 +270,37 @@ INITSTATE
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
     # Truncate container logs that can grow unbounded
-    find /var/lib/docker/containers -name "*.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null || true
+    find /var/lib/docker/containers -name "*.log" -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
     # Remove dangling volumes
     docker volume prune -f 2>/dev/null || true
     docker builder prune -af 2>/dev/null || true
-    # Clean apt cache and tmp
+    # Clean apt cache, tmp, and systemd journal
     rm -rf /tmp/npm-* /tmp/pnpm-* /var/cache/apt/archives/*.deb 2>/dev/null || true
     apt-get clean 2>/dev/null || true
+    journalctl --vacuum-size=50M 2>/dev/null || true
+    # Remove old deploy backups keeping only latest 3
+    ls -t "${DEPLOY_PATH}/backups"/db_backup_*.sql.gz 2>/dev/null | tail -n +4 | xargs -I {} rm -f {} || true
     # Remove ALL unused images (frees old tags from previous deploys)
     docker image prune -af || true
     log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
 
-    # Pull new images one at a time, pruning between pulls to keep disk usage low
+    # Pull new images one at a time, pruning between pulls to keep disk usage low.
+    # On tight-disk VPS, we may need to stop the active slot after pulling the app
+    # image so its old images become prunable, freeing space for the sandbox pull.
     log "Pulling images..."
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
     docker image prune -f 2>/dev/null || true
+
+    # Check available disk; if below 4GB, stop the active slot to free its images.
+    # This causes a brief maintenance window but prevents deploy failure.
+    AVAIL_KB="$(df --output=avail / | tail -1 | tr -d ' ')"
+    if [ "${AVAIL_KB}" -lt 4194304 ]; then
+        warn "Low disk ($(( AVAIL_KB / 1024 ))MB free). Stopping active ${ACTIVE_SLOT} slot to reclaim space..."
+        docker rm -f "hola-${ACTIVE_SLOT}-app" "hola-${ACTIVE_SLOT}-worker" "hola-${ACTIVE_SLOT}-sandbox" 2>/dev/null || true
+        docker image prune -af 2>/dev/null || true
+        log "After active slot cleanup: $(df -h / | awk 'NR==2{print $4}') available"
+    fi
+
     docker pull "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
     docker image prune -f 2>/dev/null || true
     docker pull "${REGISTRY}/iliagpt-ocr:${IMAGE_TAG}" || true

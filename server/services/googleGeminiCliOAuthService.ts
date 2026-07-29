@@ -504,7 +504,7 @@ async function nativeCompleteGeminiCliOAuthSession(params: {
   if ("error" in parsed) {
     throw new Error(parsed.error);
   }
-  if (parsed.state !== expectedState && !parsed.state.includes(expectedState)) {
+  if (parsed.state !== expectedState) {
     throw new Error("OAuth state mismatch - please try again");
   }
   return await nativeExchangeCodeForTokens(parsed.code, params.verifier, redirectUri);

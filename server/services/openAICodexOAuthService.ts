@@ -131,26 +131,38 @@ function buildProfileId(credentials: OpenAICodexCredentials): string {
 
 async function resolveStoredProfile(userId?: string | null) {
   const agentDir = resolveUserScopedAgentDir(userId);
-  if (!agentDir) {
-    return null;
+  if (agentDir) {
+    try {
+      const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+      const profileIds = listProfilesForProvider(store, PROVIDER_ID);
+      if (profileIds.length > 0) {
+        const profileId = profileIds[0];
+        const credential = store.profiles[profileId];
+        if (credential) {
+          return { profileId, credential };
+        }
+      }
+    } catch {
+      // File-based store unavailable, fall through to DB
+    }
   }
 
-  const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-  const profileIds = listProfilesForProvider(store, PROVIDER_ID);
-  if (profileIds.length === 0) {
-    return null;
+  if (userId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(userId, "openai");
+      if (userStatus.connected) {
+        return {
+          profileId: `${PROVIDER_ID}:db-fallback`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" } as Record<string, unknown>,
+        };
+      }
+    } catch {
+      // DB might not have the oauth tables yet
+    }
   }
 
-  const profileId = profileIds[0];
-  const credential = store.profiles[profileId];
-  if (!credential) {
-    return null;
-  }
-
-  return {
-    profileId,
-    credential,
-  };
+  return null;
 }
 
 function clearExpiredFlows(): void {
@@ -173,34 +185,75 @@ async function persistOpenAICodexOAuthCredentials(
   credentials: OpenAICodexCredentials,
   userId: string,
 ): Promise<void> {
+  let filePersisted = false;
   const agentDir = resolveUserScopedAgentDir(userId);
-  if (!agentDir) {
-    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
+
+  if (agentDir) {
+    try {
+      const profileId = buildProfileId(credentials);
+      upsertAuthProfile({
+        profileId,
+        agentDir,
+        credential: {
+          type: "oauth",
+          provider: PROVIDER_ID,
+          access: credentials.access,
+          refresh: credentials.refresh,
+          expires: credentials.expires,
+          accountId: credentials.accountId,
+        },
+      });
+
+      await setAuthProfileOrder({
+        agentDir,
+        provider: PROVIDER_ID,
+        order: [profileId],
+      });
+
+      filePersisted = true;
+    } catch (fileErr) {
+      console.warn(
+        "[OpenAICodexOAuth] File persistence failed (will try DB):",
+        fileErr instanceof Error ? fileErr.message : fileErr,
+      );
+    }
+
+    if (filePersisted) {
+      try {
+        const config = await loadValidConfigOrThrow();
+        await ensureOpenClawModelsJson(config, agentDir);
+        await ensurePiAuthJsonFromAuthProfiles(agentDir);
+      } catch (configErr: unknown) {
+        console.warn(
+          "[OpenAICodexOAuth] OpenClaw config integration skipped (non-critical):",
+          configErr instanceof Error ? configErr.message : configErr,
+        );
+      }
+    }
   }
 
-  const profileId = buildProfileId(credentials);
-  upsertAuthProfile({
-    profileId,
-    agentDir,
-    credential: {
-      type: "oauth",
-      provider: PROVIDER_ID,
-      access: credentials.access,
-      refresh: credentials.refresh,
-      expires: credentials.expires,
-      accountId: credentials.accountId,
-    },
-  });
+  try {
+    const { providersService } = await import("./providersService.js");
+    const expiresAt = credentials.expires > 0 ? credentials.expires : null;
+    await providersService.saveUserToken(
+      userId,
+      "openai",
+      credentials.access,
+      credentials.refresh || null,
+      expiresAt,
+      OPENAI_SCOPE,
+    );
+    console.info("[OpenAICodexOAuth] Credentials persisted to DB for user:", userId);
+  } catch (dbError) {
+    console.warn(
+      "[OpenAICodexOAuth] DB persistence failed (non-critical):",
+      dbError instanceof Error ? dbError.message : dbError,
+    );
+  }
 
-  await setAuthProfileOrder({
-    agentDir,
-    provider: PROVIDER_ID,
-    order: [profileId],
-  });
-
-  const config = await loadValidConfigOrThrow();
-  await ensureOpenClawModelsJson(config, agentDir);
-  await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  if (!filePersisted && !agentDir) {
+    console.warn("[OpenAICodexOAuth] File-based persistence unavailable (no agentDir). DB persistence was attempted as fallback.");
+  }
 }
 
 function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {
@@ -329,17 +382,25 @@ async function exchangeAuthorizationCode(params: {
   redirectUri: string;
   codeVerifier: string;
 }): Promise<OpenAICodexCredentials> {
-  const response = await fetch(OPENAI_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: OPENAI_CLIENT_ID,
-      code: params.code,
-      code_verifier: params.codeVerifier,
-      redirect_uri: params.redirectUri,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  let response: Response;
+  try {
+    response = await fetch(OPENAI_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: OPENAI_CLIENT_ID,
+        code: params.code,
+        code_verifier: params.codeVerifier,
+        redirect_uri: params.redirectUri,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -402,11 +463,19 @@ async function requestOpenAICodexDeviceCode(): Promise<{
   intervalSeconds: number;
   expiresAt: number;
 }> {
-  const response = await fetch(OPENAI_DEVICE_CODE_REQUEST_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: OPENAI_CLIENT_ID }),
-  });
+  const dcController = new AbortController();
+  const dcTimeout = setTimeout(() => dcController.abort(), 15_000);
+  let response: Response;
+  try {
+    response = await fetch(OPENAI_DEVICE_CODE_REQUEST_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: OPENAI_CLIENT_ID }),
+      signal: dcController.signal,
+    });
+  } finally {
+    clearTimeout(dcTimeout);
+  }
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -464,14 +533,22 @@ async function pollOpenAICodexDeviceCodeFlow(
 
   flow.nextPollAt = now + flow.intervalSeconds * 1000;
 
-  const response = await fetch(OPENAI_DEVICE_CODE_POLL_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      device_auth_id: flow.deviceAuthId,
-      user_code: flow.userCode,
-    }),
-  });
+  const pollController = new AbortController();
+  const pollTimeout = setTimeout(() => pollController.abort(), 15_000);
+  let response: Response;
+  try {
+    response = await fetch(OPENAI_DEVICE_CODE_POLL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_auth_id: flow.deviceAuthId,
+        user_code: flow.userCode,
+      }),
+      signal: pollController.signal,
+    });
+  } finally {
+    clearTimeout(pollTimeout);
+  }
 
   if (response.status === 403 || response.status === 404) {
     return;
