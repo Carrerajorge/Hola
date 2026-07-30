@@ -282,9 +282,9 @@ INITSTATE
     docker image prune -af || true
     log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
 
-    # Helper: get available disk in GB (integer)
-    get_avail_gb() {
-        df --output=avail -BG / | tail -1 | tr -d ' G'
+    # Helper: get available disk in MB (integer, no rounding issues)
+    get_avail_mb() {
+        df --output=avail -BM / | tail -1 | tr -d ' M'
     }
 
     # Pull new images one at a time, with aggressive disk recovery between pulls
@@ -292,12 +292,17 @@ INITSTATE
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
     docker image prune -f 2>/dev/null || true
 
-    AVAIL_GB="$(get_avail_gb)"
-    log "Disk available after app pull: ${AVAIL_GB}G"
-    if [ "${AVAIL_GB}" -lt 4 ] 2>/dev/null; then
-        warn "Low disk (${AVAIL_GB}G). Stopping active ${ACTIVE_SLOT} slot to free image layers..."
+    AVAIL_MB="$(get_avail_mb)"
+    log "Disk available after app pull: $((AVAIL_MB / 1024))G (${AVAIL_MB}M)"
+    if [ "${AVAIL_MB}" -lt 4096 ] 2>/dev/null && [ -z "${PREDEPLOY_ONLY}" ]; then
+        warn "Low disk (${AVAIL_MB}M). Stopping active ${ACTIVE_SLOT} slot to free image layers..."
         docker rm -f "hola-${ACTIVE_SLOT}-app" "hola-${ACTIVE_SLOT}-worker" "hola-${ACTIVE_SLOT}-sandbox" 2>/dev/null || true
-        docker image prune -af 2>/dev/null || true
+        # Remove old slot images by tag, but keep the newly pulled app image
+        docker images --format '{{.Repository}}:{{.Tag}}' \
+            | grep -E 'iliagpt-(app|sandbox|ocr)' \
+            | grep -v "${IMAGE_TAG}" \
+            | xargs -r docker rmi 2>/dev/null || true
+        docker image prune -f 2>/dev/null || true
         docker volume prune -f 2>/dev/null || true
         log "Disk after active slot cleanup: $(df -h / | awk 'NR==2{print $4}')"
     fi
