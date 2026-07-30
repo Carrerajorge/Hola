@@ -269,22 +269,39 @@ INITSTATE
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
-    # Truncate container logs that can grow unbounded
-    find /var/lib/docker/containers -name "*.log" -size +10M -exec truncate -s 0 {} \; 2>/dev/null || true
+    # Truncate container logs aggressively
+    find /var/lib/docker/containers -name "*.log" -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
     # Remove dangling volumes
     docker volume prune -f 2>/dev/null || true
     docker builder prune -af 2>/dev/null || true
-    # Clean apt cache and tmp
+    # Clean apt cache, tmp, and systemd journals
     rm -rf /tmp/npm-* /tmp/pnpm-* /var/cache/apt/archives/*.deb 2>/dev/null || true
     apt-get clean 2>/dev/null || true
+    journalctl --vacuum-size=50M 2>/dev/null || true
     # Remove ALL unused images (frees old tags from previous deploys)
     docker image prune -af || true
     log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
 
-    # Pull new images one at a time, pruning between pulls to keep disk usage low
+    # Helper: get available disk in GB (integer)
+    get_avail_gb() {
+        df --output=avail -BG / | tail -1 | tr -d ' G'
+    }
+
+    # Pull new images one at a time, with aggressive disk recovery between pulls
     log "Pulling images..."
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
     docker image prune -f 2>/dev/null || true
+
+    AVAIL_GB="$(get_avail_gb)"
+    log "Disk available after app pull: ${AVAIL_GB}G"
+    if [ "${AVAIL_GB}" -lt 4 ] 2>/dev/null; then
+        warn "Low disk (${AVAIL_GB}G). Stopping active ${ACTIVE_SLOT} slot to free image layers..."
+        docker rm -f "hola-${ACTIVE_SLOT}-app" "hola-${ACTIVE_SLOT}-worker" "hola-${ACTIVE_SLOT}-sandbox" 2>/dev/null || true
+        docker image prune -af 2>/dev/null || true
+        docker volume prune -f 2>/dev/null || true
+        log "Disk after active slot cleanup: $(df -h / | awk 'NR==2{print $4}')"
+    fi
+
     docker pull "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
     docker image prune -f 2>/dev/null || true
     docker pull "${REGISTRY}/iliagpt-ocr:${IMAGE_TAG}" || true
@@ -297,8 +314,8 @@ INITSTATE
     # We use gzip to save space
     if docker exec hola-postgres pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB}" | gzip > "${BACKUP_FILE}"; then
         log "Database backup saved to ${BACKUP_FILE}"
-        # Keep only the latest 5 backups
-        ls -t "${BACKUP_DIR}"/db_backup_*.sql.gz 2>/dev/null | tail -n +6 | xargs -I {} rm -f {} || true
+        # Keep only the latest 3 backups to conserve disk
+        ls -t "${BACKUP_DIR}"/db_backup_*.sql.gz 2>/dev/null | tail -n +4 | xargs -I {} rm -f {} || true
     else
         warn "Failed to create database backup. Proceeding anyway..."
         rm -f "${BACKUP_FILE}"
