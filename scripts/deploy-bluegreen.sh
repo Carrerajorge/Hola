@@ -261,6 +261,21 @@ INITSTATE
         echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env.production
     fi
 
+    # Ensure the shared Docker network exists (docker-compose.slot.yml uses external: true)
+    if ! docker network inspect hola-net >/dev/null 2>&1; then
+        log "Creating shared Docker network hola-net..."
+        docker network create hola-net || true
+    fi
+
+    # Ensure infra services (Postgres, Redis) are running
+    if ! docker ps --format '{{.Names}}' | grep -q hola-postgres; then
+        warn "hola-postgres container not found — starting infra services..."
+        if [ -f docker-compose.infra.yml ]; then
+            docker compose -p hola-infra -f docker-compose.infra.yml up -d postgres redis 2>/dev/null || true
+            sleep 5
+        fi
+    fi
+
     # Stop inactive slot containers FIRST to free their image layers before pulling new ones.
     log "Stopping existing ${INACTIVE_SLOT} containers to free disk..."
     docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
@@ -269,17 +284,20 @@ INITSTATE
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
-    # Truncate container logs aggressively
-    find /var/lib/docker/containers -name "*.log" -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
+    # Truncate ALL container logs aggressively (not just large ones)
+    find /var/lib/docker/containers -name "*.log" -exec truncate -s 0 {} \; 2>/dev/null || true
     # Remove dangling volumes
     docker volume prune -f 2>/dev/null || true
     docker builder prune -af 2>/dev/null || true
-    # Clean apt cache, tmp, and systemd journals
-    rm -rf /tmp/npm-* /tmp/pnpm-* /var/cache/apt/archives/*.deb 2>/dev/null || true
+    # Clean apt cache, tmp, systemd journals, and stale deploy artifacts
+    rm -rf /tmp/npm-* /tmp/pnpm-* /tmp/playwright* /var/cache/apt/archives/*.deb 2>/dev/null || true
+    rm -rf /root/.npm/_cacache /root/.cache/pip 2>/dev/null || true
     apt-get clean 2>/dev/null || true
-    journalctl --vacuum-size=50M 2>/dev/null || true
+    journalctl --vacuum-size=30M 2>/dev/null || true
     # Remove ALL unused images (frees old tags from previous deploys)
     docker image prune -af || true
+    # Remove any leftover overlay2 layers from images that are gone
+    docker system prune -f 2>/dev/null || true
     log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
 
     # Helper: get available disk in MB (integer, no rounding issues)
@@ -371,20 +389,31 @@ INITSTATE
     CEREBRAS_BASE_URL="${CEREBRAS_BASE_URL}" \
         docker compose -p "hola-${INACTIVE_SLOT}" -f docker-compose.slot.yml up -d app worker sandbox-runner
     
-    # Wait for health check
+    # Wait for health check (up to ~3 minutes: 45 attempts x 4s)
     log "Waiting for ${INACTIVE_SLOT} slot to become healthy..."
-    for i in $(seq 1 30); do
+    for i in $(seq 1 45); do
+        # Check if container is still running (exit early on crash-loop)
+        CONTAINER_STATE="$(docker inspect --format '{{.State.Status}}' "hola-${INACTIVE_SLOT}-app" 2>/dev/null || echo "missing")"
+        if [ "${CONTAINER_STATE}" = "exited" ] || [ "${CONTAINER_STATE}" = "dead" ]; then
+            error "Container hola-${INACTIVE_SLOT}-app ${CONTAINER_STATE} — dumping logs:"
+            docker logs "hola-${INACTIVE_SLOT}-app" --tail=80 2>&1 || true
+            exit 1
+        fi
         HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${INACTIVE_PORT}/api/health/ready" 2>/dev/null || echo "000")"
         if [ "${HTTP_CODE}" = "200" ]; then
             log "Slot ${INACTIVE_SLOT} is healthy (attempt ${i})"
             break
         fi
-        if [ "${i}" -eq 30 ]; then
-            error "Slot ${INACTIVE_SLOT} failed to become healthy"
-            docker logs "hola-${INACTIVE_SLOT}-app" --tail=50 2>&1 || true
+        if [ "${i}" -eq 45 ]; then
+            error "Slot ${INACTIVE_SLOT} failed to become healthy after 45 attempts"
+            docker logs "hola-${INACTIVE_SLOT}-app" --tail=80 2>&1 || true
             exit 1
         fi
-        sleep 2
+        if [ "${i}" -eq 15 ]; then
+            warn "Still waiting for health check (attempt ${i})... Container state: ${CONTAINER_STATE}"
+            docker logs "hola-${INACTIVE_SLOT}-app" --tail=20 2>&1 || true
+        fi
+        sleep 4
     done
     
     # Skip the rest if PREDEPLOY_ONLY is set
