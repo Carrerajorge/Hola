@@ -71,6 +71,47 @@ function isGlobalScope(req: Request): boolean {
 const OPENAI_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 const OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token";
 
+router.get("/openai/chain-start", async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.redirect("/login?error=openai_failed");
+
+    const openAIWebOAuth = getOpenAIWebOAuthAvailability();
+    if (!openAIWebOAuth.available || !openAIWebOAuth.clientId) {
+      return res.redirect("/?auth=success&provider=openai");
+    }
+
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = generateCodeChallenge(codeVerifier);
+    const oauthState = crypto.randomBytes(16).toString("hex");
+    const redirectUri = getCallbackUrl(req, "openai");
+
+    pkceFlowStore.set(oauthState, {
+      userId,
+      codeVerifier,
+      oauthState,
+      provider: "openai",
+      isGlobal: false,
+      createdAt: Date.now(),
+    });
+
+    const params = new URLSearchParams({
+      client_id: openAIWebOAuth.clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openai.model.read openai.chat.completions.create",
+      state: oauthState,
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+    });
+
+    res.redirect(`${OPENAI_AUTHORIZE_URL}?${params.toString()}`);
+  } catch (error: any) {
+    console.error("[ProviderOAuth] OpenAI chain-start error:", error);
+    res.redirect("/?auth=success&provider=openai");
+  }
+});
+
 router.post("/openai/start", async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
@@ -209,9 +250,23 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
       );
     }
 
+    // If this came from a chained login redirect (not a popup), go to home.
+    // The Referer header is absent for cross-origin redirects from OpenAI,
+    // and the chain-start endpoint uses GET (full-page redirect), so check
+    // if the request looks like a top-level navigation.
+    const acceptsHtml = (req.headers.accept || "").includes("text/html");
+    const isLikelyFullPageRedirect = acceptsHtml && !req.headers["sec-fetch-dest"]?.includes("iframe");
+    if (isLikelyFullPageRedirect) {
+      return res.redirect("/?auth=success&openai_connected=true");
+    }
+
     res.send(renderCallbackPage("success", "OpenAI conectado exitosamente"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
+    const acceptsHtml = (req.headers.accept || "").includes("text/html");
+    if (acceptsHtml) {
+      return res.redirect("/?auth=error&provider=openai");
+    }
     res.status(500).send(renderCallbackPage("error", error.message));
   }
 });

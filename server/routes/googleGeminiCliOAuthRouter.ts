@@ -152,15 +152,15 @@ googleGeminiCliOAuthRouter.get(
       // and avoids the slower file/DB lookups that may fail in transient environments.
       // Check regardless of whether getUserId() succeeded — the session flag
       // is available even before passport deserialization completes.
+      // Accept the flag even without hasAccessToken — the flag itself proves
+      // the user completed the Google OAuth flow with Gemini scopes.
       const sessionGemini = session?.geminiCliConnected;
       if (
         sessionGemini &&
-        sessionGemini.hasAccessToken &&
         Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
       ) {
         const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
-        if (sessionGemini.accessToken && fastPathUserId) {
-          // Normalize expiresAt: values < 1e12 are seconds, convert to ms
+        if (sessionGemini.hasAccessToken && sessionGemini.accessToken && fastPathUserId) {
           const normalizedExpiresAt = sessionGemini.expiresAt
             ? (sessionGemini.expiresAt > 1e12 ? sessionGemini.expiresAt : sessionGemini.expiresAt * 1000)
             : undefined;
@@ -209,15 +209,11 @@ googleGeminiCliOAuthRouter.get(
 
       if (cookieFallback) {
         const fallbackUserId = userId || cookieFallback.userId;
-        // Clear the one-shot cookie so it doesn't persist beyond first check
-        res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
-        res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
-        // Re-persist to session so subsequent checks hit the fast path
-        // instead of relying on the cookie again.
-        // hasAccessToken is false because the cookie fallback does not carry
-        // a real OAuth token — this prevents the session fast path from
-        // calling persistGeminiCliCredentialsFromGoogleTokens with a fake value.
+        // Re-persist to session so subsequent checks hit the fast path.
+        // Do NOT clear the cookie — let it expire naturally (30 min).
+        // Clearing it on first read caused a gap: if the session save below
+        // failed, subsequent requests would find neither cookie nor session flag.
         if (session && typeof session.save === "function") {
           try {
             session.geminiCliConnected = {
