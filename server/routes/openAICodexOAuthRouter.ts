@@ -120,7 +120,8 @@ openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
           parsed.ts &&
           Date.now() - parsed.ts < 30 * 60 * 1000
         ) {
-          res.clearCookie("iliagpt_provider_connected_openai", { path: "/" });
+          // Do NOT clear the cookie — let it expire naturally (30 min).
+          // Premature clearing caused a gap when session save lagged.
           return res.json({
             connected: true,
             providerId: "openai-codex",
