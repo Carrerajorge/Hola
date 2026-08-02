@@ -48,7 +48,17 @@ if [[ -n "${GHCR_TOKEN:-}" ]]; then
   echo "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" -u "${GHCR_USERNAME}" --password-stdin >/dev/null
 fi
 
-# 2) Ensure all slot images exist before compose tries to start containers.
+# 2) Clean up old images for this preview slot before pulling new ones.
+echo "[preview] Cleaning up old containers and images for ${PREVIEW_SLUG}..."
+docker compose -p "${PROJECT}" -f docker-compose.slot.yml down --remove-orphans 2>/dev/null || true
+docker images --format '{{.Repository}}:{{.Tag}}' \
+  | grep -E 'iliagpt-(app|sandbox|ocr)' \
+  | grep -v "${IMAGE_TAG}" \
+  | grep -v 'latest' \
+  | xargs -r docker rmi -f 2>/dev/null || true
+docker image prune -f 2>/dev/null || true
+
+# 3) Ensure all slot images exist before compose tries to start containers.
 for image in app sandbox ocr; do
   docker pull "ghcr.io/carrerajorge/iliagpt-${image}:${IMAGE_TAG}" >/dev/null
 done
