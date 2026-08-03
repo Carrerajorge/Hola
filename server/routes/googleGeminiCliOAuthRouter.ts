@@ -209,24 +209,31 @@ googleGeminiCliOAuthRouter.get(
 
       if (cookieFallback) {
         const fallbackUserId = userId || cookieFallback.userId;
-        // Clear the one-shot cookie so it doesn't persist beyond first check
         res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
-        // Re-persist to session so subsequent checks hit the fast path
-        // instead of relying on the cookie again.
-        // hasAccessToken is false because the cookie fallback does not carry
-        // a real OAuth token — this prevents the session fast path from
-        // calling persistGeminiCliCredentialsFromGoogleTokens with a fake value.
+        // Only set the cookie-based session flag if the session does NOT
+        // already carry a richer geminiCliConnected entry (e.g. one with
+        // a real access token set by the Google OAuth callback).  Previous
+        // code unconditionally overwrote the session flag with
+        // hasAccessToken:false, destroying valid tokens that the callback
+        // had just persisted.
         if (session && typeof session.save === "function") {
           try {
-            session.geminiCliConnected = {
-              hasAccessToken: false,
-              email: cookieFallback.email || null,
-              connectedAt: Date.now(),
-              userId: fallbackUserId,
-            };
-            session.save(() => {}); // fire-and-forget
+            const existing = session.geminiCliConnected;
+            const existingIsFresh =
+              existing &&
+              existing.hasAccessToken &&
+              Date.now() - (existing.connectedAt || 0) < 24 * 3600 * 1000;
+            if (!existingIsFresh) {
+              session.geminiCliConnected = {
+                hasAccessToken: false,
+                email: cookieFallback.email || null,
+                connectedAt: Date.now(),
+                userId: fallbackUserId,
+              };
+              session.save(() => {});
+            }
           } catch { /* best-effort */ }
         }
 
@@ -265,6 +272,33 @@ googleGeminiCliOAuthRouter.get(
       }
 
       const status = await getGoogleGeminiCliOAuthStatus(effectiveUserId || userId);
+
+      // If the file/credential-based check says not connected, also check
+      // the DB via providersService.  The Google OAuth callback persists
+      // tokens to the DB, so this covers the case where the file-based
+      // store hasn't been written yet (e.g. first login, container restart).
+      if (!status.connected && (effectiveUserId || userId)) {
+        try {
+          const { providersService } = await import("../services/providersService.js");
+          const dbStatus = await providersService.getUserTokenStatus(
+            effectiveUserId || userId!,
+            "gemini",
+          );
+          if (dbStatus.connected) {
+            return res.json({
+              connected: true,
+              providerId: "google-gemini-cli",
+              defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+              defaultModelId: "gemini-3.1-pro-preview",
+              profileId: "db-fallback",
+              email: status.email || null,
+            });
+          }
+        } catch {
+          // DB lookup failed; return the file-based status
+        }
+      }
+
       res.json(status);
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);
