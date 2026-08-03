@@ -205,6 +205,19 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
         const tokens = await tokenResponse.json();
 
+        // Verify that the generative-language scope was granted when
+        // provider_hint is gemini/antigravity.  Google may silently drop
+        // scopes the user did not consent to, and an access_token without
+        // this scope cannot call Gemini APIs.
+        if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
+            const grantedScope = typeof tokens.scope === "string" ? tokens.scope : "";
+            if (!grantedScope.includes("generative-language")) {
+                console.warn("[Google Auth] generative-language scope NOT granted. Granted:", grantedScope);
+            } else {
+                console.log("[Google Auth] generative-language scope confirmed for", stateData.providerHint);
+            }
+        }
+
         // Get user info from Google
         const userResponse = await fetch(config.userInfoUrl, {
             headers: {

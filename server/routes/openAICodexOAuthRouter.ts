@@ -135,7 +135,26 @@ openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
 
     let effectiveUserId: string | null = null;
     try { effectiveUserId = getUserId(req); } catch { /* unauthenticated */ }
-    res.json(await getOpenAICodexOAuthStatus(effectiveUserId));
+    const status = await getOpenAICodexOAuthStatus(effectiveUserId);
+
+    if (!status.connected && effectiveUserId) {
+      try {
+        const { providersService } = await import("../services/providersService.js");
+        const dbStatus = await providersService.getUserTokenStatus(effectiveUserId, "openai");
+        if (dbStatus.connected) {
+          return res.json({
+            connected: true,
+            providerId: "openai-codex",
+            defaultModelRef: "openai-codex/gpt-5.4",
+            defaultModelId: "gpt-5.4",
+            profileId: "db-fallback",
+            accountId: null,
+          });
+        }
+      } catch { /* DB lookup failed */ }
+    }
+
+    res.json(status);
   } catch (error) {
     console.error("[OpenAICodexOAuth] status failed:", error);
     res
