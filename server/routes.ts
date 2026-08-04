@@ -694,14 +694,75 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, async (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Google login error:", loginErr);
+            // ── Extract provider_hint BEFORE req.logIn ──
+            // Read provider_hint from session or cookie before login, so it's
+            // available even if req.logIn fails due to session store issues.
+            const preLoginSess = (req as any).session;
+            let phFromCookie = "";
+            if (!preLoginSess?.providerHint) {
+              if (!req.cookies && req.headers.cookie) {
+                const { parse: parseCookie } = await import("cookie");
+                req.cookies = parseCookie(req.headers.cookie);
+              }
+              phFromCookie = req.cookies?.["__iliagpt_ph"] || "";
+              if (!phFromCookie && req.headers.cookie) {
+                try {
+                  const { parse: parseCookie } = await import("cookie");
+                  const rawParsed = parseCookie(req.headers.cookie);
+                  phFromCookie = rawParsed["__iliagpt_ph"] || "";
+                } catch {}
+              }
+            }
+            const providerHint = preLoginSess?.providerHint || phFromCookie;
+            const userEmail = user?.claims?.email || user?.email || "";
+            const directTokens = (user as any)?._googleOAuthTokens ?? null;
+
+            // ── Persist Gemini tokens to DB BEFORE req.logIn ──
+            // This ensures tokens are saved even if the session store is
+            // unhealthy and req.logIn fails. The DB persistence is the most
+            // reliable path and avoids a second OAuth popup on the client.
+            if ((providerHint === "gemini" || providerHint === "antigravity") && directTokens?.access_token) {
+              try {
+                const { providersService: ps } = await import("./services/providersService");
+                const expiresAt = directTokens.expires_at
+                  ? (directTokens.expires_at > 1e12 ? directTokens.expires_at : directTokens.expires_at * 1000)
+                  : Date.now() + 3600 * 1000;
+                await ps.saveUserToken(
+                  String(userId),
+                  "gemini",
+                  directTokens.access_token,
+                  directTokens.refresh_token || null,
+                  expiresAt,
+                  "https://www.googleapis.com/auth/generative-language",
+                );
+                console.info("[Auth] Gemini DB token persisted BEFORE login for:", userId);
+              } catch (earlyDbErr: any) {
+                console.warn("[Auth] Early Gemini DB persistence failed (will retry after login):", earlyDbErr?.message || earlyDbErr);
+              }
+            }
+
+            // ── req.logIn with retry ──
+            const doLogIn = (): Promise<void> => new Promise((resolve, reject) => {
+              (req as any).logIn(user, (loginErr: any) => {
+                if (loginErr) reject(loginErr);
+                else resolve();
+              });
+            });
+
+            try {
+              await doLogIn();
+            } catch (loginErr: any) {
+              console.warn("[Auth] Google logIn attempt 1 failed, retrying:", loginErr?.message || loginErr);
+              try {
+                await new Promise(r => setTimeout(r, 300));
+                await doLogIn();
+              } catch (retryErr: any) {
+                console.error("[Auth] Google logIn retry also failed:", retryErr?.message || retryErr);
                 return res.redirect("/login?error=login_failed");
               }
+            }
 
-              // Persist userId explicitly for robust auth across deployments.
-              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+            {
               const session = (req as any).session as any | undefined;
               if (session) {
                 session.authUserId = String(userId);
@@ -711,45 +772,13 @@ export async function registerRoutes(
                 }
               }
 
-              // Determine redirect based on provider_hint saved before OAuth.
-              // Read from session first, fall back to the backup cookie.
-              const sess = (req as any).session;
-              let phFromCookie = "";
-              if (!sess?.providerHint) {
-                // Parse cookies manually if not already parsed
-                if (!req.cookies && req.headers.cookie) {
-                  const { parse: parseCookie } = await import("cookie");
-                  req.cookies = parseCookie(req.headers.cookie);
-                }
-                phFromCookie = req.cookies?.["__iliagpt_ph"] || "";
-                // If req.cookies was already parsed by middleware but missed
-                // the cookie (e.g. different parsing behavior), fall back to
-                // parsing the raw Cookie header directly.
-                if (!phFromCookie && req.headers.cookie) {
-                  try {
-                    const { parse: parseCookie } = await import("cookie");
-                    const rawParsed = parseCookie(req.headers.cookie);
-                    phFromCookie = rawParsed["__iliagpt_ph"] || "";
-                  } catch {
-                    // Ignore parse errors on raw cookie header
-                  }
-                }
+              if (preLoginSess) {
+                delete preLoginSess.providerHint;
               }
-              const providerHint = sess?.providerHint || phFromCookie;
-              // Clear after use so it doesn't persist across sessions.
-              if (sess) {
-                delete sess.providerHint;
-              }
-              // Clear the backup cookie
               if (phFromCookie) {
                 res.clearCookie("__iliagpt_ph", { path: "/" });
               }
 
-              // Build redirect URL: if the user came from a specific provider button,
-              // include it so the client can auto-trigger the relevant connection flow.
-              // Pass the user's email so the secondary provider OAuth can skip the
-              // account picker (login_hint) for a seamless single-click experience.
-              const userEmail = user?.claims?.email || user?.email || "";
               const emailParam = userEmail ? `&email=${encodeURIComponent(userEmail)}` : "";
               let redirectTarget = "/?auth=success";
               if (providerHint === "gemini") {
@@ -760,18 +789,11 @@ export async function registerRoutes(
                 redirectTarget = `/?auth=success&provider=antigravity${emailParam}`;
               }
 
-              // When provider_hint is gemini or antigravity, persist the Google
-              // OAuth tokens as Gemini CLI credentials so the user doesn't need a
-              // second OAuth popup. Await completion before redirect so the client
-              // sees connected: true immediately and doesn't trigger a second flow.
               if (providerHint === "gemini" || providerHint === "antigravity") {
-                // Extract direct tokens from the user object (attached by passport strategy)
-                const directTokens = (user as any)?._googleOAuthTokens ?? null;
                 if (!directTokens) {
                   console.warn(
                     "[Auth] No _googleOAuthTokens found on user object for provider hint:",
                     providerHint,
-                    "– user will still be logged in but Gemini credential persistence may be incomplete.",
                   );
                 }
                 let geminiPersisted = false;
@@ -795,34 +817,9 @@ export async function registerRoutes(
                     geminiPersistError?.message || geminiPersistError,
                   );
                 }
-                // Also save the token to the providers DB so the combined
-                // provider status endpoint (/api/oauth/providers/status) reports
-                // Gemini as connected. This avoids a second OAuth popup.
-                if (directTokens?.access_token) {
-                  try {
-                    const { providersService: ps } = await import("./services/providersService");
-                    const expiresAt = directTokens.expires_at
-                      ? (directTokens.expires_at > 1e12 ? directTokens.expires_at : directTokens.expires_at * 1000)
-                      : Date.now() + 3600 * 1000;
-                    await ps.saveUserToken(
-                      String(userId),
-                      "gemini",
-                      directTokens.access_token,
-                      directTokens.refresh_token || null,
-                      expiresAt,
-                      "https://www.googleapis.com/auth/generative-language",
-                    );
-                  } catch (dbErr: any) {
-                    console.warn("[Auth] Gemini DB token persistence failed (non-blocking):", dbErr?.message || dbErr);
-                  }
-                }
-                // Always store the connected state in the session so the status
-                // endpoint can return connected: true immediately after redirect,
-                // even if file/DB persistence failed above.
-                // Include actual tokens so the status endpoint can re-persist
-                // credentials if the initial file/DB persistence failed.
-                if (sess) {
-                  sess.geminiCliConnected = {
+                // DB persistence already done before req.logIn (early path above).
+                if (session) {
+                  session.geminiCliConnected = {
                     email: email || null,
                     userId: String(userId),
                     connectedAt: Date.now(),
@@ -856,13 +853,12 @@ export async function registerRoutes(
               }
 
               const doRedirect = () => res.redirect(redirectTarget);
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
+              if (session?.save) {
+                session.save((saveErr: any) => {
                   if (saveErr) {
                     console.warn("[Auth] Google session save failed, retrying once:", saveErr);
-                    // Retry once after a short delay
                     setTimeout(() => {
-                      sess.save((retryErr: any) => {
+                      session.save((retryErr: any) => {
                         if (retryErr) {
                           console.error("[Auth] Google session save retry failed:", retryErr);
                         }
@@ -877,7 +873,7 @@ export async function registerRoutes(
               }
 
               doRedirect();
-            });
+            }
           })().catch(next);
         },
       )(req, res, next);
