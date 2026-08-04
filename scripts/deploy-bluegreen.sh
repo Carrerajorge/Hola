@@ -266,20 +266,35 @@ INITSTATE
     docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
     free_slot_port "${INACTIVE_PORT}"
 
+    # Stop and remove ALL preview containers to free their image layers.
+    log "Stopping all preview containers to free disk for production deploy..."
+    mapfile -t preview_containers < <(docker ps -a --filter "name=hola-pr-" --format '{{.Names}}' 2>/dev/null || true)
+    if [ "${#preview_containers[@]}" -gt 0 ] && [ -n "${preview_containers[0]}" ]; then
+        docker rm -f "${preview_containers[@]}" 2>/dev/null || true
+        log "Removed ${#preview_containers[@]} preview containers"
+    fi
+
     # Clean up old docker artifacts to prevent disk exhaustion
     log "Cleaning up old docker containers and images..."
     docker container prune -f || true
-    # Truncate container logs aggressively
-    find /var/lib/docker/containers -name "*.log" -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
-    # Remove dangling volumes
+    # Truncate ALL container logs aggressively
+    find /var/lib/docker/containers -name "*.log" -size +2M -exec truncate -s 0 {} \; 2>/dev/null || true
+    # Remove dangling and unused volumes
     docker volume prune -f 2>/dev/null || true
     docker builder prune -af 2>/dev/null || true
-    # Clean apt cache, tmp, and systemd journals
+    # Clean apt cache, tmp, systemd journals, and old logs
     rm -rf /tmp/npm-* /tmp/pnpm-* /var/cache/apt/archives/*.deb 2>/dev/null || true
     apt-get clean 2>/dev/null || true
-    journalctl --vacuum-size=50M 2>/dev/null || true
+    journalctl --vacuum-size=30M 2>/dev/null || true
+    find /var/log -name "*.gz" -mtime +3 -delete 2>/dev/null || true
+    find /var/log -name "*.1" -mtime +3 -delete 2>/dev/null || true
     # Remove ALL unused images (frees old tags from previous deploys)
     docker image prune -af || true
+    # Remove preview images explicitly (they won't be caught by prune if tagged)
+    docker images --format '{{.Repository}}:{{.Tag}}' \
+        | grep -E 'iliagpt-(app|sandbox|ocr)' \
+        | grep -v "${IMAGE_TAG}" \
+        | xargs -r docker rmi -f 2>/dev/null || true
     log "Disk cleanup complete. Available: $(df -h / | awk 'NR==2{print $4}')"
 
     # Helper: get available disk in MB (integer, no rounding issues)
@@ -297,14 +312,26 @@ INITSTATE
     if [ "${AVAIL_MB}" -lt 4096 ] 2>/dev/null && [ -z "${PREDEPLOY_ONLY}" ]; then
         warn "Low disk (${AVAIL_MB}M). Stopping active ${ACTIVE_SLOT} slot to free image layers..."
         docker rm -f "hola-${ACTIVE_SLOT}-app" "hola-${ACTIVE_SLOT}-worker" "hola-${ACTIVE_SLOT}-sandbox" 2>/dev/null || true
-        # Remove old slot images by tag, but keep the newly pulled app image
+        # Remove ALL non-infra images except the newly pulled app image.
+        # This is more aggressive than tag-based cleanup — it force-removes
+        # any iliagpt image not matching the current deploy tag.
         docker images --format '{{.Repository}}:{{.Tag}}' \
             | grep -E 'iliagpt-(app|sandbox|ocr)' \
             | grep -v "${IMAGE_TAG}" \
-            | xargs -r docker rmi 2>/dev/null || true
-        docker image prune -f 2>/dev/null || true
-        docker volume prune -f 2>/dev/null || true
+            | xargs -r docker rmi -f 2>/dev/null || true
+        # Nuclear prune: remove ALL unused images, build cache, and volumes
+        docker system prune -af --volumes 2>/dev/null || true
         log "Disk after active slot cleanup: $(df -h / | awk 'NR==2{print $4}')"
+        AVAIL_MB="$(get_avail_mb)"
+        if [ "${AVAIL_MB}" -lt 2048 ] 2>/dev/null; then
+            warn "Still critically low (${AVAIL_MB}M). Removing ALL Docker images except the app image..."
+            docker images --format '{{.ID}} {{.Repository}}:{{.Tag}}' \
+                | grep -v "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" \
+                | awk '{print $1}' \
+                | xargs -r docker rmi -f 2>/dev/null || true
+            docker system prune -af 2>/dev/null || true
+            log "Disk after nuclear cleanup: $(df -h / | awk 'NR==2{print $4}')"
+        fi
     fi
 
     docker pull "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"

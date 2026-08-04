@@ -19,8 +19,13 @@ fi
 echo "[preview] Cleaning up ${PREVIEW_SLUG} (${PROJECT})"
 
 if docker compose -p "${PROJECT}" -f docker-compose.slot.yml ps >/dev/null 2>&1; then
-  docker compose -p "${PROJECT}" -f docker-compose.slot.yml down --remove-orphans || true
+  docker compose -p "${PROJECT}" -f docker-compose.slot.yml down --remove-orphans --rmi local || true
 fi
+
+# Remove any leftover containers for this preview
+docker ps -a --filter "name=${PROJECT}" --format '{{.Names}}' | xargs -r docker rm -f 2>/dev/null || true
+# Prune dangling images freed by the removal
+docker image prune -f 2>/dev/null || true
 
 if [ -f "${NGINX_SITE_PATH}" ]; then
   echo "[preview] Removing nginx vhost: ${NGINX_SITE_PATH}"

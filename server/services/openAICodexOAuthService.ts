@@ -131,26 +131,38 @@ function buildProfileId(credentials: OpenAICodexCredentials): string {
 
 async function resolveStoredProfile(userId?: string | null) {
   const agentDir = resolveUserScopedAgentDir(userId);
-  if (!agentDir) {
-    return null;
+  if (agentDir) {
+    try {
+      const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+      const profileIds = listProfilesForProvider(store, PROVIDER_ID);
+      if (profileIds.length > 0) {
+        const profileId = profileIds[0];
+        const credential = store.profiles[profileId];
+        if (credential) {
+          return { profileId, credential };
+        }
+      }
+    } catch {
+      // File-based lookup failed; fall through to DB
+    }
   }
 
-  const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-  const profileIds = listProfilesForProvider(store, PROVIDER_ID);
-  if (profileIds.length === 0) {
-    return null;
+  if (userId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(userId, "openai");
+      if (userStatus.connected) {
+        return {
+          profileId: `${PROVIDER_ID}:db-fallback`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" },
+        };
+      }
+    } catch {
+      // DB might not have the oauth tables yet
+    }
   }
 
-  const profileId = profileIds[0];
-  const credential = store.profiles[profileId];
-  if (!credential) {
-    return null;
-  }
-
-  return {
-    profileId,
-    credential,
-  };
+  return null;
 }
 
 function clearExpiredFlows(): void {
