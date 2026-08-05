@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { apiFetch } from "@/lib/apiClient";
 import { GeminiCliOAuthButton } from "./GeminiCliOAuthButton";
 import { OpenAICodexOAuthButton } from "./OpenAICodexOAuthButton";
 import {
@@ -185,32 +186,59 @@ export function ProviderConnectionHubButton({
   // whether we already handled the auto-connect to avoid duplicate dialogs.
   const autoConnectHandledRef = React.useRef(false);
 
-  const handleAutoConnect = React.useCallback((provider: string, email?: string) => {
+  const handleAutoConnect = React.useCallback(async (provider: string, email?: string) => {
     if (autoConnectHandledRef.current) return;
     autoConnectHandledRef.current = true;
-    // Clear persisted pending auto-connect
     try { window.sessionStorage.removeItem("iliagpt:pending-auto-connect"); } catch {}
-    // Force refetch provider status — the Google OAuth callback (with provider_hint)
-    // may have already persisted Gemini/OpenAI credentials server-side. If the status
-    // cache still shows "not connected", the child dialog would start a redundant
-    // second OAuth popup. Invalidating now ensures the child sees fresh status.
+
     void queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/gemini-cli/status"] });
     void queryClient.invalidateQueries({ queryKey: ["/api/oauth/openai/codex/status"] });
     void queryClient.invalidateQueries({ queryKey: ["/api/oauth/providers/status"] });
-    // Mark which provider should auto-start
-    setAutoStartProvider(provider);
-    // Capture email from the login redirect
+
     if (email) setAutoConnectEmail(email);
-    // Open the hub dialog first
+
+    const isGemini = provider === "gemini" || provider === "antigravity";
+    const statusUrl = isGemini
+      ? "/api/oauth/google/gemini-cli/status"
+      : provider === "openai"
+        ? "/api/oauth/openai/codex/status"
+        : null;
+
+    if (statusUrl) {
+      const checkDelays = [300, 800, 1500, 3000, 5000];
+      for (const delay of checkDelays) {
+        await new Promise((r) => setTimeout(r, delay));
+        try {
+          const res = await apiFetch(statusUrl, { cache: "no-store" });
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.connected) {
+              void queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+              const providerLabel = isGemini ? "Gemini" : "ChatGPT";
+              const modelId = data.defaultModelId || (isGemini ? "gemini-3.1-pro-preview" : "gpt-5.3-codex");
+              toast({
+                title: `${providerLabel} conectado`,
+                description: data.email
+                  ? `La cuenta ${data.email} ya puede usar ${providerLabel} desde ILIAGPT.`
+                  : `${providerLabel} ya puede usarse desde ILIAGPT.`,
+              });
+              onConnected?.(modelId);
+              return;
+            }
+          }
+        } catch {
+          // Status check failed, continue to next delay
+        }
+      }
+    }
+
+    setAutoStartProvider(provider);
     setOpen(true);
-    // Retry opening the specific provider dialog until the ref is available.
-    // Child components set the ref during render, which may take a few frames
-    // if content is lazy-loaded or queries are still settling.
     const delays = [300, 600, 1200, 2000, 3500, 5500];
     const timers: number[] = [];
     for (const delay of delays) {
       timers.push(window.setTimeout(() => {
-        if ((provider === "gemini" || provider === "antigravity") && geminiOpenDialogRef.current) {
+        if (isGemini && geminiOpenDialogRef.current) {
           geminiOpenDialogRef.current();
           timers.forEach((t) => window.clearTimeout(t));
         } else if (provider === "openai" && openaiOpenDialogRef.current) {
@@ -219,7 +247,7 @@ export function ProviderConnectionHubButton({
         }
       }, delay));
     }
-  }, [queryClient]);
+  }, [queryClient, toast, onConnected]);
 
   React.useEffect(() => {
     const handler = (event: Event) => {
