@@ -333,7 +333,14 @@ async function buildAll() {
 
   await rm("dist", { recursive: true, force: true });
 
-  await buildEmbeddedOpenClawControlUi();
+  try {
+    await buildEmbeddedOpenClawControlUi();
+  } catch (openClawBuildError: any) {
+    console.warn(
+      `[build] OpenClaw Control UI build failed (non-fatal): ${openClawBuildError?.message || openClawBuildError}`,
+    );
+    console.warn("[build] Continuing without embedded OpenClaw UI — main app will still function.");
+  }
 
   console.log("building client...");
   // Some environments terminate long-running commands that don't emit output.
