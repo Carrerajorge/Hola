@@ -172,7 +172,16 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                     // Persist tokens (best-effort: never block login on token storage issues).
                     // Determine scope: if the user came from Gemini/Antigravity
                     // login, the session stores providerHint from the initial request.
-                    const providerHint = (req as any)?.session?.providerHint || "";
+                    // Fall back to the __iliagpt_ph cookie if the session lost
+                    // the hint (e.g. session store hiccup during OAuth redirect).
+                    let providerHint = (req as any)?.session?.providerHint || "";
+                    if (!providerHint) {
+                        try {
+                            const rawCookies = req.headers?.cookie || "";
+                            const phMatch = rawCookies.match(/(?:^|;\s*)__iliagpt_ph=([^;]+)/);
+                            if (phMatch) providerHint = decodeURIComponent(phMatch[1]).trim();
+                        } catch { /* cookie parse best-effort */ }
+                    }
                     const isGeminiLogin = providerHint === "gemini" || providerHint === "antigravity";
                     const persistedScope = isGeminiLogin
                         ? "openid email profile https://www.googleapis.com/auth/generative-language"
@@ -202,6 +211,30 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                         refresh_token: refreshToken,
                         expires_at: Math.floor(Date.now() / 1000) + 3600,
                     };
+
+                    // For Gemini/Antigravity logins, persist credentials early
+                    // (before the callback handler's session-save dance) to
+                    // minimize the window where /status returns not-connected.
+                    if (isGeminiLogin && accessToken) {
+                        try {
+                            const { persistGeminiCliCredentialsFromGoogleTokens } =
+                                await import("../../services/googleGeminiCliOAuthService.js");
+                            await persistGeminiCliCredentialsFromGoogleTokens(
+                                user.id,
+                                email,
+                                {
+                                    access_token: accessToken,
+                                    refresh_token: refreshToken,
+                                    expires_at: Date.now() + 3600 * 1000,
+                                },
+                            );
+                            Logger.info(`[Passport] Gemini CLI credentials persisted early for: ${email}`);
+                        } catch (earlyPersistError: any) {
+                            Logger.warn("[Passport] Early Gemini credential persistence failed (will retry in callback):", {
+                                error: (earlyPersistError as any)?.message || earlyPersistError,
+                            });
+                        }
+                    }
 
                     return done(null, user);
                 } catch (error) {

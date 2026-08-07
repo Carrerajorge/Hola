@@ -237,6 +237,37 @@ googleGeminiCliOAuthRouter.get(
           } catch { /* best-effort */ }
         }
 
+        // Before returning connected:true from the cookie fallback, verify
+        // that actual credentials exist in the DB. The cookie only proves
+        // the login redirect happened — it does NOT carry tokens. Without
+        // this check, the client skips the connection flow but then fails
+        // when actually calling Gemini APIs.
+        if (fallbackUserId) {
+          try {
+            const { providersService } = await import("../services/providersService.js");
+            const dbCheck = await providersService.getUserTokenStatus(
+              fallbackUserId,
+              "gemini",
+            );
+            if (!dbCheck.connected) {
+              const fileStatus = await getGoogleGeminiCliOAuthStatus(fallbackUserId);
+              if (!fileStatus.connected) {
+                return res.json({
+                  connected: false,
+                  providerId: "google-gemini-cli",
+                  defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+                  defaultModelId: "gemini-3.1-pro-preview",
+                  profileId: null,
+                  email: cookieFallback.email || null,
+                });
+              }
+            }
+          } catch {
+            // DB/file check failed; fall through to report connected
+            // based on the cookie signal (best-effort)
+          }
+        }
+
         return res.json({
           connected: true,
           providerId: "google-gemini-cli",
