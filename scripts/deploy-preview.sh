@@ -48,6 +48,27 @@ if [[ -n "${GHCR_TOKEN:-}" ]]; then
   echo "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" -u "${GHCR_USERNAME}" --password-stdin >/dev/null
 fi
 
+# 1.5) Free disk space before pulling new images.
+# Previous preview deployments leave behind stopped containers and dangling
+# images that accumulate and eventually exhaust the VPS disk.
+echo "[preview] Cleaning up old preview containers and images to free disk..."
+for old_project in $(docker ps -a --filter "label=com.docker.compose.project" --format '{{.Labels}}' 2>/dev/null | grep -oP 'com.docker.compose.project=\Khola-pr-[0-9]+' | sort -u); do
+  if [[ "${old_project}" != "${PROJECT}" ]]; then
+    echo "[preview]   Stopping old project: ${old_project}"
+    docker compose -p "${old_project}" down --remove-orphans --timeout 10 2>/dev/null || true
+  fi
+done
+docker image prune -f 2>/dev/null || true
+docker container prune -f 2>/dev/null || true
+docker builder prune -f --keep-storage=2GB 2>/dev/null || true
+
+AVAIL_MB=$(df -m /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}' || echo "0")
+echo "[preview] Available disk: ${AVAIL_MB}MB"
+if [[ "${AVAIL_MB}" -lt 2000 ]]; then
+  echo "[preview] Low disk — aggressive prune of unused images"
+  docker image prune -a -f --filter "until=48h" 2>/dev/null || true
+fi
+
 # 2) Ensure all slot images exist before compose tries to start containers.
 for image in app sandbox ocr; do
   docker pull "ghcr.io/carrerajorge/iliagpt-${image}:${IMAGE_TAG}" >/dev/null
