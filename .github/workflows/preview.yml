@@ -57,7 +57,7 @@ jobs:
 
       - name: Checkout
         if: steps.check_secrets.outputs.has_secrets == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Compute host port
         if: steps.check_secrets.outputs.has_secrets == 'true'
@@ -116,7 +116,7 @@ jobs:
 
       - name: Checkout
         if: steps.check_secrets.outputs.has_secrets == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup SSH key
         if: steps.check_secrets.outputs.has_secrets == 'true'
