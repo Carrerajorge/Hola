@@ -155,7 +155,7 @@ googleGeminiCliOAuthRouter.get(
       const sessionGemini = session?.geminiCliConnected;
       if (
         sessionGemini &&
-        sessionGemini.hasAccessToken &&
+        (sessionGemini.hasAccessToken || sessionGemini.connectedAt) &&
         Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
       ) {
         const fastPathUserId = userId || session?.passport?.user || sessionGemini.userId;
@@ -268,6 +268,43 @@ googleGeminiCliOAuthRouter.get(
           } catch {
             // Re-persistence failed; continue to normal check
           }
+        }
+      }
+
+      // Check the token manager for Google tokens with generative-language scope.
+      // The Passport Google strategy persists tokens here on every login, so this
+      // catches the case where the session flag/cookie weren't set but the user
+      // did log in with the Gemini scope.
+      if (effectiveUserId || userId) {
+        try {
+          const { tokenManager } = await import("../lib/auth/tokenManager.js");
+          const googleTokens = await tokenManager.getTokens(effectiveUserId || userId!, "google");
+          if (
+            googleTokens?.access_token &&
+            typeof googleTokens.scope === "string" &&
+            googleTokens.scope.includes("generative-language")
+          ) {
+            const userEmail = (req as any).user?.claims?.email || (req as any).user?.email || null;
+            persistGeminiCliCredentialsFromGoogleTokens(
+              effectiveUserId || userId!,
+              userEmail,
+              {
+                access_token: googleTokens.access_token,
+                refresh_token: googleTokens.refresh_token,
+                expires_at: googleTokens.expiry_date,
+              },
+            ).catch(() => {});
+            return res.json({
+              connected: true,
+              providerId: "google-gemini-cli",
+              defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+              defaultModelId: "gemini-3.1-pro-preview",
+              profileId: "token-manager",
+              email: userEmail,
+            });
+          }
+        } catch {
+          // Token manager lookup failed; continue to other checks
         }
       }
 
