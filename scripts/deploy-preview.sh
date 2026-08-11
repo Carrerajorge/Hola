@@ -48,7 +48,22 @@ if [[ -n "${GHCR_TOKEN:-}" ]]; then
   echo "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" -u "${GHCR_USERNAME}" --password-stdin >/dev/null
 fi
 
-# 2) Ensure all slot images exist before compose tries to start containers.
+# 2) Reclaim disk space before pulling images.
+#    The VPS accumulates old preview images and dangling layers that can exhaust
+#    /var/lib/docker. Clean them up proactively so the pull doesn't hit "no space
+#    left on device".
+echo "[preview] Reclaiming Docker disk space..."
+docker container prune -f 2>/dev/null || true
+docker image prune -f 2>/dev/null || true
+# Remove images from previous preview deploys for THIS slot (old tags)
+docker images --format '{{.Repository}}:{{.Tag}}' \
+  | grep -E 'iliagpt-(app|sandbox|ocr):sha-' \
+  | grep -v ":${IMAGE_TAG}$" \
+  | head -20 \
+  | xargs -r docker rmi 2>/dev/null || true
+docker builder prune -f --keep-storage=2GB 2>/dev/null || true
+
+# 3) Ensure all slot images exist before compose tries to start containers.
 for image in app sandbox ocr; do
   docker pull "ghcr.io/carrerajorge/iliagpt-${image}:${IMAGE_TAG}" >/dev/null
 done
