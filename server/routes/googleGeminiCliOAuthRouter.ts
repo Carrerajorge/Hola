@@ -212,12 +212,10 @@ googleGeminiCliOAuthRouter.get(
         res.clearCookie("iliagpt_provider_connected_gemini", { path: "/" });
         res.clearCookie("iliagpt_provider_connected_antigravity", { path: "/" });
 
-        // Only set the cookie-based session flag if the session does NOT
-        // already carry a richer geminiCliConnected entry (e.g. one with
-        // a real access token set by the Google OAuth callback).  Previous
-        // code unconditionally overwrote the session flag with
-        // hasAccessToken:false, destroying valid tokens that the callback
-        // had just persisted.
+        // Try to promote the cookie fallback to a full session flag with
+        // real tokens from the DB. The login callback persists tokens to
+        // the DB, so they should be available even when the session store
+        // hasn't propagated the geminiCliConnected flag yet.
         if (session && typeof session.save === "function") {
           try {
             const existing = session.geminiCliConnected;
@@ -226,12 +224,31 @@ googleGeminiCliOAuthRouter.get(
               existing.hasAccessToken &&
               Date.now() - (existing.connectedAt || 0) < 24 * 3600 * 1000;
             if (!existingIsFresh) {
-              session.geminiCliConnected = {
-                hasAccessToken: false,
-                email: cookieFallback.email || null,
-                connectedAt: Date.now(),
-                userId: fallbackUserId,
-              };
+              let promotedFromDb = false;
+              try {
+                const { providersService: ps } = await import("../services/providersService.js");
+                const dbToken = await ps.resolveToken(fallbackUserId, "gemini");
+                if (dbToken?.token) {
+                  session.geminiCliConnected = {
+                    hasAccessToken: true,
+                    email: cookieFallback.email || null,
+                    connectedAt: Date.now(),
+                    userId: fallbackUserId,
+                    accessToken: dbToken.token,
+                    refreshToken: dbToken.refreshToken || null,
+                    expiresAt: dbToken.expiresAt || null,
+                  };
+                  promotedFromDb = true;
+                }
+              } catch { /* DB lookup failed; fall through to basic flag */ }
+              if (!promotedFromDb) {
+                session.geminiCliConnected = {
+                  hasAccessToken: false,
+                  email: cookieFallback.email || null,
+                  connectedAt: Date.now(),
+                  userId: fallbackUserId,
+                };
+              }
               session.save(() => {});
             }
           } catch { /* best-effort */ }
