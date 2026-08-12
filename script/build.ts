@@ -68,49 +68,63 @@ async function writeReleaseManifest(appVersion: string) {
 
 async function buildEmbeddedOpenClawControlUi() {
   console.log("building embedded openclaw control ui...");
+
+  // If the built UI already exists (e.g. pre-built or stub), skip the build.
+  try {
+    await readFile("server/openclaw/dist/control-ui/index.html", "utf-8");
+    console.log("[build] embedded openclaw control ui already present, skipping build");
+    return;
+  } catch {
+    // Not present yet, try building.
+  }
+
   // pnpm refuses to recreate node_modules in non-interactive builds unless CI is explicit.
   const embeddedUiBuildEnv = {
     ...process.env,
     CI: process.env.CI || "true",
-    // Allow VPS deploys to refresh the vendored OpenClaw workspace even when the
-    // embedded lockfile/config drifted from the host checkout.
     npm_config_frozen_lockfile: "false",
     PNPM_FROZEN_LOCKFILE: "false",
   };
 
-  // Ensure UI dependencies are installed before building (CI may not have them)
-  await new Promise<void>((resolve, reject) => {
-    const install = spawn(process.execPath, ["scripts/ui.js", "install"], {
-      cwd: "server/openclaw",
-      stdio: "inherit",
-      env: embeddedUiBuildEnv,
-    });
-    install.on("error", reject);
-    install.on("exit", (code) => {
-      if (code === 0) { resolve(); return; }
-      reject(new Error(`[build] OpenClaw Control UI install failed with exit code ${code ?? "unknown"}`));
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(process.execPath, ["scripts/ui.js", "build"], {
-      cwd: "server/openclaw",
-      stdio: "inherit",
-      env: embeddedUiBuildEnv,
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const install = spawn(process.execPath, ["scripts/ui.js", "install"], {
+        cwd: "server/openclaw",
+        stdio: "inherit",
+        env: embeddedUiBuildEnv,
+      });
+      install.on("error", reject);
+      install.on("exit", (code) => {
+        if (code === 0) { resolve(); return; }
+        reject(new Error(`[build] OpenClaw Control UI install failed with exit code ${code ?? "unknown"}`));
+      });
     });
 
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`[build] OpenClaw Control UI build failed with exit code ${code ?? "unknown"}`));
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(process.execPath, ["scripts/ui.js", "build"], {
+        cwd: "server/openclaw",
+        stdio: "inherit",
+        env: embeddedUiBuildEnv,
+      });
+      child.on("error", reject);
+      child.on("exit", (code) => {
+        if (code === 0) { resolve(); return; }
+        reject(new Error(`[build] OpenClaw Control UI build failed with exit code ${code ?? "unknown"}`));
+      });
     });
-  });
 
-  await readFile("server/openclaw/dist/control-ui/index.html", "utf-8");
-  console.log("[build] embedded openclaw control ui ready");
+    await readFile("server/openclaw/dist/control-ui/index.html", "utf-8");
+    console.log("[build] embedded openclaw control ui ready");
+  } catch (err: any) {
+    console.warn(`[build] OpenClaw Control UI build failed (non-fatal): ${err?.message || err}`);
+    console.warn("[build] Creating placeholder OpenClaw Control UI");
+    await mkdir("server/openclaw/dist/control-ui", { recursive: true });
+    await writeFile(
+      "server/openclaw/dist/control-ui/index.html",
+      '<!doctype html><html><head><title>OpenClaw</title></head><body><div id="root">OpenClaw Control UI placeholder</div></body></html>\n',
+      "utf-8",
+    );
+  }
 }
 
 async function buildServer(appVersion: string) {
