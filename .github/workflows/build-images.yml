@@ -212,7 +212,7 @@ jobs:
       - name: Build & push app image (runner stage)
         id: build_app
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: runner
@@ -239,7 +239,7 @@ jobs:
       - name: Build & push sandbox-runner image
         id: build_sandbox
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: sandbox-runner
@@ -260,7 +260,7 @@ jobs:
       - name: Build & push OCR image
         id: build_ocr
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ocr_service/Dockerfile
