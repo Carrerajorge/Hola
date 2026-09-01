@@ -596,17 +596,17 @@ export async function registerRoutes(
           (async () => {
             if (err || !user) {
               const failureCode = resolveGoogleAuthFailureCode(err, info);
+              const hasCode = typeof req.query.code === "string" && req.query.code.trim();
 
-              // ── State-mismatch recovery ──
-              // When the session store loses the Passport CSRF state (PG hiccup,
-              // cookie not sent, etc.), recover by manually exchanging the code
-              // for tokens and completing the login without Passport.
-              if (
-                failureCode === "google_state_failed" &&
-                typeof req.query.code === "string" &&
-                req.query.code.trim()
-              ) {
-                console.info("[Auth] Attempting state-mismatch recovery for Google OAuth");
+              // ── Universal recovery ──
+              // When Passport fails for ANY reason (state mismatch, session loss,
+              // InternalOAuthError, deserialization failure, etc.) and a valid
+              // Google authorization code is present, recover by manually
+              // exchanging the code for tokens. This makes login resilient to
+              // transient session-store failures (PG hiccups, cookie not sent,
+              // cluster process mismatch, etc.).
+              if (hasCode) {
+                console.info("[Auth] Passport authentication failed (%s), attempting manual recovery with authorization code", failureCode);
                 try {
                   const { manualGoogleTokenExchange, fetchGoogleUserInfo } =
                     await import("./lib/auth/oauthStateRecovery");
@@ -643,17 +643,16 @@ export async function registerRoutes(
                       expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
                     },
                   };
-                  // Re-assign user/err so the rest of the handler continues normally
                   user = recoveredSessionUser;
                   err = null;
-                  console.info("[Auth] State-mismatch recovery succeeded for:", googleUser.email);
+                  console.info("[Auth] Manual recovery succeeded for:", googleUser.email);
                 } catch (recoveryError: any) {
-                  console.error("[Auth] State-mismatch recovery failed:", recoveryError?.message || recoveryError);
-                  return res.redirect("/login?error=google_state_failed");
+                  console.error("[Auth] Manual recovery failed:", recoveryError?.message || recoveryError);
+                  return res.redirect(`/login?error=${failureCode}`);
                 }
               } else {
                 if (err || info) {
-                  console.warn("[Auth] Google callback failed:", {
+                  console.warn("[Auth] Google callback failed (no code to recover):", {
                     failureCode,
                     error: err instanceof Error ? err.message : err || null,
                     info,
@@ -857,22 +856,22 @@ export async function registerRoutes(
 
               const doRedirect = () => res.redirect(redirectTarget);
               if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) {
-                    console.warn("[Auth] Google session save failed, retrying once:", saveErr);
-                    // Retry once after a short delay
-                    setTimeout(() => {
-                      sess.save((retryErr: any) => {
-                        if (retryErr) {
-                          console.error("[Auth] Google session save retry failed:", retryErr);
-                        }
-                        doRedirect();
-                      });
-                    }, 200);
-                    return;
-                  }
-                  doRedirect();
-                });
+                const saveWithRetry = (attempt: number): Promise<void> =>
+                  new Promise<void>((resolve) => {
+                    sess.save((saveErr: any) => {
+                      if (saveErr && attempt < 3) {
+                        console.warn(`[Auth] Session save attempt ${attempt} failed, retrying:`, saveErr?.message || saveErr);
+                        setTimeout(() => saveWithRetry(attempt + 1).then(resolve), 150 * attempt);
+                        return;
+                      }
+                      if (saveErr) {
+                        console.error("[Auth] All session save attempts failed:", saveErr?.message || saveErr);
+                      }
+                      resolve();
+                    });
+                  });
+                await saveWithRetry(1);
+                doRedirect();
                 return;
               }
 
