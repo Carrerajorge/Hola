@@ -163,7 +163,7 @@
     "embla-carousel-react": "^8.6.0",
     "emoji-regex": "^10.6.0",
     "exceljs": "^4.4.0",
-    "express": "^4.21.2",
+    "express": "^4.22.2",
     "express-session": "^1.18.2",
     "fast-check": "^4.5.3",
     "file-saver": "^2.0.5",
@@ -315,7 +315,7 @@
     "@chevrotain/gast": "^11.1.1",
     "lodash-es": "^4.17.23",
     "axios": "^1.13.5",
-    "qs": "^6.15.0",
+    "qs": "^6.15.2",
     "fast-xml-parser": "^5.3.6",
     "@isaacs/brace-expansion": "^5.0.1",
     "@aws-sdk/xml-builder": "^3.972.4"
