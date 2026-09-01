@@ -16,7 +16,7 @@ python-magic==0.4.27
 chardet==5.2.0
 
 # Utilities
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 pydantic==2.6.1
 pydantic-settings==2.1.0
 rich==13.7.0
