@@ -542,7 +542,7 @@ export async function registerRoutes(
       passport.authenticate("google", {
         scope: scopes,
         accessType: "offline",
-        prompt: "select_account consent",
+        prompt: loginHint ? "consent" : "select_account consent",
         callbackURL,
         ...(loginHint ? { loginHint } : {}),
       })(req, res, next);
