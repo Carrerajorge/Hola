@@ -247,9 +247,54 @@ googleGeminiCliOAuthRouter.get(
         });
       }
 
+      // Passport user fast path: if the user is authenticated via Google OAuth
+      // and has an access_token in their session user, they likely just logged in
+      // with Gemini/Antigravity scopes. Re-persist and return connected.
+      const passportUser = (req as any).user;
+      if (passportUser?.access_token && !cookieFallback) {
+        const passportUserId = userId || session?.passport?.user || passportUser.id;
+        if (passportUserId) {
+          try {
+            await persistGeminiCliCredentialsFromGoogleTokens(
+              passportUserId,
+              passportUser.claims?.email || passportUser.email,
+              {
+                access_token: passportUser.access_token,
+                refresh_token: passportUser.refresh_token,
+                expires_at: passportUser.expires_at,
+              },
+            );
+          } catch {}
+
+          // Set the session flag so future checks use the fast path
+          if (session && typeof session.save === "function") {
+            try {
+              session.geminiCliConnected = {
+                hasAccessToken: true,
+                accessToken: passportUser.access_token,
+                refreshToken: passportUser.refresh_token || null,
+                email: passportUser.claims?.email || passportUser.email || null,
+                connectedAt: Date.now(),
+                userId: passportUserId,
+              };
+              session.save(() => {});
+            } catch {}
+          }
+
+          return res.json({
+            connected: true,
+            providerId: "google-gemini-cli",
+            defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+            defaultModelId: "gemini-3.1-pro-preview",
+            profileId: "passport-user-fallback",
+            email: passportUser.claims?.email || passportUser.email || null,
+          });
+        }
+      }
+
       const effectiveUserId = userId || session?.passport?.user || session?.authUserId;
       if (effectiveUserId) {
-        const sessionUser = (req as any).user;
+        const sessionUser = passportUser;
         if (sessionUser?.access_token) {
           try {
             await persistGeminiCliCredentialsFromGoogleTokens(

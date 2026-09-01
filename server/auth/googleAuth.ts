@@ -318,6 +318,16 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 console.log("[Google Auth] geminiCliConnected session flag set BEFORE save for:", email);
             }
 
+            if (stateData.providerHint === "openai") {
+                (req.session as any).openaiCodexConnected = {
+                    hasAccessToken: true,
+                    email: email || null,
+                    connectedAt: Date.now(),
+                    userId: resolvedUser.id,
+                };
+                console.log("[Google Auth] openaiCodexConnected session flag set for:", email);
+            }
+
             // Force session save before redirect (critical for OAuth flow).
             // Retry once on transient failure to avoid losing credentials.
             const saveSessionWithRetry = (cb: () => void) => {
