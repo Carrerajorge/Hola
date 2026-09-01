@@ -316,8 +316,8 @@
     "lodash-es": "^4.17.23",
     "axios": "^1.13.5",
     "qs": "^6.15.0",
-    "fast-xml-parser": "^5.3.6",
+    "fast-xml-parser": "^5.5.11",
     "@isaacs/brace-expansion": "^5.0.1",
-    "@aws-sdk/xml-builder": "^3.972.4"
+    "@aws-sdk/xml-builder": "^3.972.17"
   }
 }
