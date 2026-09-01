@@ -37,13 +37,13 @@ paddle = [
 ]
 dev = [
   "hypothesis>=6.0.0",
-  "pytest>=9.0.0",
+  "pytest>=9.0.3",
   "pytest-cov>=6.0.0",
   "pytest-benchmark>=5.0.0",
 ]
 all = [
   "hypothesis>=6.0.0",
-  "pytest>=9.0.0",
+  "pytest>=9.0.3",
   "pytest-cov>=6.0.0",
   "pytest-benchmark>=5.0.0",
   "paddleocr>=2.7.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
